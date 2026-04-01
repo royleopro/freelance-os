@@ -21,7 +21,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Save, Settings, Target } from "lucide-react";
+import { Save, Settings, Target, AlertCircle, Upload, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 
 const MOIS_LABELS = [
   "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin",
@@ -64,10 +67,9 @@ function getParam(params: Parametre[], cle: string, fallback: string): string {
 
 export default function ParametresPage() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [savingFinance, setSavingFinance] = useState(false);
   const [savingObjectifs, setSavingObjectifs] = useState(false);
-  const [financeSaved, setFinanceSaved] = useState(false);
-  const [objectifsSaved, setObjectifsSaved] = useState(false);
 
   const [finance, setFinance] = useState<FinanceForm>({
     taux_urssaf: "0.256",
@@ -82,39 +84,53 @@ export default function ParametresPage() {
   const year = new Date().getFullYear();
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient();
-    const [paramsRes, objectifsRes] = await Promise.all([
-      supabase.from("parametres").select("*"),
-      supabase
-        .from("objectifs")
-        .select("*")
-        .eq("annee", year)
-        .order("mois", { ascending: true }),
-    ]);
+    try {
+      const supabase = createClient();
+      const [paramsRes, objectifsRes] = await Promise.all([
+        supabase.from("parametres").select("*"),
+        supabase
+          .from("objectifs")
+          .select("*")
+          .eq("annee", year)
+          .order("mois", { ascending: true }),
+      ]);
 
-    const params = (paramsRes.data as Parametre[]) ?? [];
-    setFinance({
-      taux_urssaf: getParam(params, "taux_urssaf", "0.256"),
-      taux_impots: getParam(params, "taux_impots", "0.02"),
-      objectif_net_mensuel: getParam(params, "objectif_net_mensuel", "2000"),
-      frais_mensuels_fixes: getParam(params, "frais_mensuels_fixes", "131.67"),
-      solde_compte_pro: getParam(params, "solde_compte_pro", "0"),
-    });
+      const firstError = paramsRes.error || objectifsRes.error;
+      if (firstError) {
+        setError("Impossible de charger les parametres.");
+        toast.error("Erreur de chargement", { description: firstError.message });
+        return;
+      }
 
-    const dbObjectifs = (objectifsRes.data as Objectif[]) ?? [];
-    const rows: ObjectifRow[] = [];
-    for (let m = 1; m <= 12; m++) {
-      const existing = dbObjectifs.find((o) => o.mois === m);
-      const defaults = DEFAULT_OBJECTIFS[m - 1];
-      rows.push({
-        mois: m,
-        ca_cible: String(existing?.ca_cible ?? defaults.ca_cible),
-        tjm_cible: String(existing?.tjm_cible ?? defaults.tjm_cible),
-        jours_cibles: String(existing?.jours_cibles ?? defaults.jours_cibles),
+      const params = (paramsRes.data as Parametre[]) ?? [];
+      setFinance({
+        taux_urssaf: getParam(params, "taux_urssaf", "0.256"),
+        taux_impots: getParam(params, "taux_impots", "0.02"),
+        objectif_net_mensuel: getParam(params, "objectif_net_mensuel", "2000"),
+        frais_mensuels_fixes: getParam(params, "frais_mensuels_fixes", "131.67"),
+        solde_compte_pro: getParam(params, "solde_compte_pro", "0"),
       });
+
+      const dbObjectifs = (objectifsRes.data as Objectif[]) ?? [];
+      const rows: ObjectifRow[] = [];
+      for (let m = 1; m <= 12; m++) {
+        const existing = dbObjectifs.find((o) => o.mois === m);
+        const defaults = DEFAULT_OBJECTIFS[m - 1];
+        rows.push({
+          mois: m,
+          ca_cible: String(existing?.ca_cible ?? defaults.ca_cible),
+          tjm_cible: String(existing?.tjm_cible ?? defaults.tjm_cible),
+          jours_cibles: String(existing?.jours_cibles ?? defaults.jours_cibles),
+        });
+      }
+      setObjectifs(rows);
+      setError(null);
+    } catch {
+      setError("Impossible de charger les parametres.");
+      toast.error("Erreur reseau", { description: "Verifiez votre connexion internet." });
+    } finally {
+      setLoading(false);
     }
-    setObjectifs(rows);
-    setLoading(false);
   }, [year]);
 
   useEffect(() => {
@@ -123,7 +139,6 @@ export default function ParametresPage() {
 
   function updateFinance(field: keyof FinanceForm, value: string) {
     setFinance((prev) => ({ ...prev, [field]: value }));
-    setFinanceSaved(false);
   }
 
   function updateObjectif(
@@ -136,7 +151,6 @@ export default function ParametresPage() {
       next[index] = { ...next[index], [field]: value };
       return next;
     });
-    setObjectifsSaved(false);
   }
 
   async function saveFinance() {
@@ -153,7 +167,7 @@ export default function ParametresPage() {
     );
 
     setSavingFinance(false);
-    setFinanceSaved(true);
+    toast.success("Parametres financiers sauvegardes");
   }
 
   async function saveObjectifs() {
@@ -173,7 +187,7 @@ export default function ParametresPage() {
       .upsert(rows, { onConflict: "annee,mois" });
 
     setSavingObjectifs(false);
-    setObjectifsSaved(true);
+    toast.success("Objectifs sauvegardes");
   }
 
   const totalCaCible = objectifs.reduce(
@@ -183,19 +197,81 @@ export default function ParametresPage() {
 
   if (loading) {
     return (
-      <div className="py-12 text-center text-muted-foreground">
-        Chargement...
+      <div className="space-y-6">
+        <div>
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="mt-2 h-4 w-64" />
+        </div>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-4 w-72" />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-9 w-full" />
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="h-4 w-48" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-9 w-28" />
+                <Skeleton className="h-9 w-28" />
+                <Skeleton className="h-9 w-24" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <AlertCircle className="size-10 text-destructive" />
+        <p className="text-muted-foreground">{error}</p>
+        <button
+          onClick={() => { setLoading(true); fetchData(); }}
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          Reessayer
+        </button>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Parametres</h1>
-        <p className="text-muted-foreground">
-          Configurez votre espace de travail.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Parametres</h1>
+          <p className="text-muted-foreground">
+            Configurez votre espace de travail.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" render={<Link href="/parametres/qonto" />}>
+            <RefreshCw data-icon="inline-start" />
+            Qonto
+          </Button>
+          <Button variant="outline" render={<Link href="/parametres/import" />}>
+            <Upload data-icon="inline-start" />
+            Import CSV
+          </Button>
+        </div>
       </div>
 
       {/* Section 1 : Parametres financiers */}
@@ -289,15 +365,10 @@ export default function ParametresPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button onClick={saveFinance} disabled={savingFinance}>
-              <Save data-icon="inline-start" />
-              {savingFinance ? "Enregistrement..." : "Sauvegarder"}
-            </Button>
-            {financeSaved && (
-              <span className="text-sm text-emerald-400">Enregistre !</span>
-            )}
-          </div>
+          <Button onClick={saveFinance} disabled={savingFinance}>
+            <Save data-icon="inline-start" />
+            {savingFinance ? "Enregistrement..." : "Sauvegarder"}
+          </Button>
         </CardContent>
       </Card>
 
@@ -374,15 +445,10 @@ export default function ParametresPage() {
             </TableBody>
           </Table>
 
-          <div className="flex items-center gap-3">
-            <Button onClick={saveObjectifs} disabled={savingObjectifs}>
-              <Save data-icon="inline-start" />
-              {savingObjectifs ? "Enregistrement..." : "Sauvegarder tout"}
-            </Button>
-            {objectifsSaved && (
-              <span className="text-sm text-emerald-400">Enregistre !</span>
-            )}
-          </div>
+          <Button onClick={saveObjectifs} disabled={savingObjectifs}>
+            <Save data-icon="inline-start" />
+            {savingObjectifs ? "Enregistrement..." : "Sauvegarder tout"}
+          </Button>
         </CardContent>
       </Card>
     </div>

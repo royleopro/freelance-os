@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import type { TransactionStatut } from "@/lib/types";
 import {
   Dialog,
@@ -68,7 +69,10 @@ export function NouveauPaiementDialog({
     });
     setSaving(false);
 
-    if (!error) {
+    if (error) {
+      toast.error("Erreur", { description: "Impossible d'ajouter le paiement." });
+    } else {
+      toast.success("Paiement ajoute");
       setForm(defaultForm);
       onOpenChange(false);
       onCreated();
@@ -124,6 +128,7 @@ export function NouveauPaiementDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="paye">Paye</SelectItem>
+                <SelectItem value="signe">Signe</SelectItem>
                 <SelectItem value="en_attente">En attente</SelectItem>
               </SelectContent>
             </Select>

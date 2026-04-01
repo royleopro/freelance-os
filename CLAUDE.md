@@ -20,3 +20,8 @@ Next.js 14 App Router, Supabase, Tailwind, shadcn/ui
 - Composants shadcn/ui pour les formulaires, modals, tableaux
 - Calculs : rentabilité = montant_payé / heures_facturables
 - Taux URSSAF : 25.6%, taux impôts : 2%
+
+## Règle migrations SQL
+Après chaque modification de schéma (ALTER TABLE, CREATE VIEW, etc.),
+toujours rappeler : "⚠️ À exécuter manuellement dans Supabase SQL Editor"
+et afficher le SQL exact à copier-coller.

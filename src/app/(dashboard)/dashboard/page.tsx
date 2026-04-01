@@ -8,8 +8,8 @@ import type {
   TransactionCA,
   SessionHeureAvecProjet,
   Parametre,
-  Etiquette,
 } from "@/lib/types";
+import { getEtiquette } from "@/lib/etiquettes";
 import {
   Card,
   CardContent,
@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Euro,
   TrendingUp,
@@ -33,22 +34,14 @@ import {
   ShieldCheck,
   Clock,
   FolderKanban,
+  AlertCircle,
 } from "lucide-react";
 import { CaMensuelChart } from "./ca-mensuel-chart";
+import { toast } from "sonner";
 
 const TAUX_URSSAF = 0.256;
 const TAUX_IMPOTS = 0.02;
 
-const etiquetteConfig: Record<Etiquette, { label: string; className: string }> =
-  {
-    design_ui: { label: "Design UI", className: "bg-purple-500/20 text-purple-400 border-purple-500/30" },
-    wireframe: { label: "Wireframe", className: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30" },
-    reunion: { label: "Reunion", className: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
-    code: { label: "Code", className: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
-    administration: { label: "Administration", className: "bg-slate-500/20 text-slate-400 border-slate-500/30" },
-    prospection: { label: "Prospection", className: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30" },
-    autre: { label: "Autre", className: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30" },
-  };
 
 function formatEuro(n: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -74,34 +67,54 @@ export default function DashboardPage() {
   const [sessions, setSessions] = useState<SessionHeureAvecProjet[]>([]);
   const [parametres, setParametres] = useState<Parametre[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
-    const supabase = createClient();
-    const year = new Date().getFullYear();
-    const yearStart = `${year}-01-01`;
-    const yearEnd = `${year}-12-31`;
+    try {
+      const supabase = createClient();
+      const year = new Date().getFullYear();
+      const yearStart = `${year}-01-01`;
+      const yearEnd = `${year}-12-31`;
 
-    const [projetsRes, transactionsRes, sessionsRes, paramsRes] =
-      await Promise.all([
-        supabase.from("projets").select("*"),
-        supabase
-          .from("transactions_ca")
-          .select("*")
-          .gte("date", yearStart)
-          .lte("date", yearEnd),
-        supabase
-          .from("sessions_heures")
-          .select("*, projets(nom)")
-          .order("date", { ascending: false })
-          .limit(200),
-        supabase.from("parametres").select("*"),
-      ]);
+      const [projetsRes, transactionsRes, sessionsRes, paramsRes] =
+        await Promise.all([
+          supabase.from("projets_with_ca").select("*"),
+          supabase
+            .from("transactions_ca")
+            .select("*")
+            .gte("date", yearStart)
+            .lte("date", yearEnd),
+          supabase
+            .from("sessions_heures")
+            .select("*, projets(nom, type)")
+            .order("date", { ascending: false })
+            .limit(200),
+          supabase.from("parametres").select("*"),
+        ]);
 
-    setProjets((projetsRes.data as Projet[]) ?? []);
-    setTransactions((transactionsRes.data as TransactionCA[]) ?? []);
-    setSessions((sessionsRes.data as SessionHeureAvecProjet[]) ?? []);
-    setParametres((paramsRes.data as Parametre[]) ?? []);
-    setLoading(false);
+      const firstError =
+        projetsRes.error || transactionsRes.error || sessionsRes.error || paramsRes.error;
+      if (firstError) {
+        setError("Impossible de charger les donnees du dashboard.");
+        toast.error("Erreur de chargement", {
+          description: firstError.message,
+        });
+        return;
+      }
+
+      setProjets((projetsRes.data as Projet[]) ?? []);
+      setTransactions((transactionsRes.data as TransactionCA[]) ?? []);
+      setSessions((sessionsRes.data as SessionHeureAvecProjet[]) ?? []);
+      setParametres((paramsRes.data as Parametre[]) ?? []);
+      setError(null);
+    } catch {
+      setError("Impossible de charger les donnees du dashboard.");
+      toast.error("Erreur reseau", {
+        description: "Verifiez votre connexion internet.",
+      });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -112,12 +125,18 @@ export default function DashboardPage() {
   const objectifAnnuel = getParam(parametres, "objectif_ca_annuel", 60000);
   const moisSurvie = getParam(parametres, "mois_survie", 6);
 
+  // IDs des projets client uniquement (pour filtrer le CA)
+  const clientProjetIds = useMemo(
+    () => new Set(projets.filter((p) => p.type === "client").map((p) => p.id)),
+    [projets]
+  );
+
   const caPayeAnnee = useMemo(
     () =>
       transactions
-        .filter((t) => t.statut === "paye")
+        .filter((t) => t.statut === "paye" && clientProjetIds.has(t.projet_id))
         .reduce((sum, t) => sum + t.montant, 0),
-    [transactions]
+    [transactions, clientProjetIds]
   );
 
   const progressionCA = objectifAnnuel > 0 ? (caPayeAnnee / objectifAnnuel) * 100 : 0;
@@ -128,9 +147,9 @@ export default function DashboardPage() {
       ? (caPayeAnnee / moisEcoules) * (1 - TAUX_URSSAF - TAUX_IMPOTS)
       : 0;
 
-  // Rentabilité moyenne projets actifs
+  // Rentabilité moyenne projets actifs (type client uniquement)
   const projetsActifs = useMemo(
-    () => projets.filter((p) => p.statut === "en_cours"),
+    () => projets.filter((p) => p.statut === "en_cours" && p.type === "client"),
     [projets]
   );
 
@@ -151,13 +170,13 @@ export default function DashboardPage() {
       : null;
   }, [projetsActifs, sessions, transactions]);
 
-  // --- Données graphique CA mensuel ---
+  // --- Données graphique CA mensuel (projets client uniquement) ---
   const chartData = useMemo(() => {
     const objectifMensuel = objectifAnnuel / 12;
     const parMois = new Array(12).fill(0);
 
     for (const t of transactions) {
-      if (t.statut === "paye") {
+      if (t.statut === "paye" && clientProjetIds.has(t.projet_id)) {
         const mois = new Date(t.date).getMonth();
         parMois[mois] += t.montant;
       }
@@ -168,7 +187,7 @@ export default function DashboardPage() {
       objectif: Math.round(objectifMensuel),
       paye: Math.round(parMois[i]),
     }));
-  }, [transactions, objectifAnnuel]);
+  }, [transactions, objectifAnnuel, clientProjetIds]);
 
   // --- Projets actifs avec stats ---
   const projetsActifsStats = useMemo(() => {
@@ -189,8 +208,62 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="py-12 text-center text-muted-foreground">
-        Chargement...
+      <div className="space-y-6">
+        <div>
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="mt-2 h-4 w-72" />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card size="sm" key={i}>
+              <CardHeader>
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-6 w-20" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-3 w-32" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-44" />
+            <Skeleton className="h-4 w-60" />
+          </CardHeader>
+          <CardContent>
+            <Skeleton className="h-64 w-full" />
+          </CardContent>
+        </Card>
+        <div className="grid gap-6 lg:grid-cols-2">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader>
+                <Skeleton className="h-5 w-36" />
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {Array.from({ length: 3 }).map((_, j) => (
+                  <Skeleton key={j} className="h-4 w-full" />
+                ))}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-20">
+        <AlertCircle className="size-10 text-destructive" />
+        <p className="text-muted-foreground">{error}</p>
+        <button
+          onClick={() => { setLoading(true); fetchData(); }}
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          Reessayer
+        </button>
       </div>
     );
   }
@@ -310,14 +383,23 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FolderKanban className="size-4" />
-              Projets actifs
+              Projets clients actifs
             </CardTitle>
           </CardHeader>
           <CardContent>
             {projetsActifsStats.length === 0 ? (
-              <p className="text-muted-foreground py-4 text-center">
-                Aucun projet en cours.
-              </p>
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <FolderKanban className="size-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  Aucun projet en cours.
+                </p>
+                <Link
+                  href="/projets"
+                  className="text-sm font-medium text-primary hover:underline"
+                >
+                  Voir tous les projets
+                </Link>
+              </div>
             ) : (
               <Table>
                 <TableHeader>
@@ -368,9 +450,18 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {dernieresSessions.length === 0 ? (
-              <p className="text-muted-foreground py-4 text-center">
-                Aucune session enregistree.
-              </p>
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <Clock className="size-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  Aucune session enregistree.
+                </p>
+                <Link
+                  href="/heures"
+                  className="text-sm font-medium text-primary hover:underline"
+                >
+                  Loguer du temps
+                </Link>
+              </div>
             ) : (
               <Table>
                 <TableHeader>
@@ -382,7 +473,7 @@ export default function DashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {dernieresSessions.map((s) => {
-                    const cfg = etiquetteConfig[s.etiquette];
+                    const cfg = getEtiquette(s.etiquette);
                     return (
                       <TableRow key={s.id}>
                         <TableCell className="font-medium">

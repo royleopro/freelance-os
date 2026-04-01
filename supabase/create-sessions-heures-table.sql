@@ -5,7 +5,7 @@ create table if not exists sessions_heures (
   date date not null default current_date,
   duree numeric(6,2) not null default 0,
   etiquette text not null default 'autre'
-    check (etiquette in ('design_ui', 'wireframe', 'reunion', 'code', 'administration', 'prospection', 'autre')),
+    check (etiquette in ('projet', 'prospection', 'wireframe', 'communication', 'design ui', 'réunion', 'analyse', 'organisation', 'administration', 'brainstorming', 'formation', 'tests utilisateurs', 'design system', 'prototypage', 'mail/discussion', 'study case', 'facturation', 'graphisme', 'outillage', 'design thinking', 'maintenance', 'benchmark', 'veille', 'retouches UI/UX', 'code', 'autre')),
   facturable boolean not null default true,
   created_at timestamptz default now()
 );
