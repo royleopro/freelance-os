@@ -257,7 +257,7 @@ export default function ProjetsPage() {
                     <TableHead className="text-right">Signe</TableHead>
                     <TableHead className="text-right">Paye</TableHead>
                     <TableHead className="text-right">Heures</TableHead>
-                    <TableHead className="text-right">Rentabilite</TableHead>
+                    <TableHead className="text-right">Rentabilite reelle</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>

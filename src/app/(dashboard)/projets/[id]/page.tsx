@@ -10,6 +10,7 @@ import type {
   ProjetType,
   SessionHeure,
   TransactionCA,
+  Devis,
 } from "@/lib/types";
 import { getEtiquette } from "@/lib/etiquettes";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +37,7 @@ import {
   Calendar,
   Clock,
   Euro,
+  FileText,
   Pencil,
   Plus,
   TrendingUp,
@@ -58,6 +60,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { NouveauPaiementDialog } from "./nouveau-paiement-dialog";
+import { NouveauDevisDialog } from "./nouveau-devis-dialog";
 import { ProjetDialog } from "../projet-dialog";
 
 const typeConfig: Record<ProjetType, { label: string; className: string }> = {
@@ -129,15 +132,18 @@ export default function ProjetDetailPage() {
   const [projet, setProjet] = useState<Projet | null>(null);
   const [sessions, setSessions] = useState<SessionHeure[]>([]);
   const [transactions, setTransactions] = useState<TransactionCA[]>([]);
+  const [devisList, setDevisList] = useState<Devis[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paiementDialogOpen, setPaiementDialogOpen] = useState(false);
+  const [paiementDevisId, setPaiementDevisId] = useState<string | null>(null);
+  const [devisDialogOpen, setDevisDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const [projetRes, sessionsRes, transactionsRes] = await Promise.all([
+      const [projetRes, sessionsRes, transactionsRes, devisRes] = await Promise.all([
         supabase.from("projets_with_ca").select("*").eq("id", params.id).single(),
         supabase
           .from("sessions_heures")
@@ -149,6 +155,11 @@ export default function ProjetDetailPage() {
           .select("*")
           .eq("projet_id", params.id)
           .order("date", { ascending: false }),
+        supabase
+          .from("devis")
+          .select("*")
+          .eq("projet_id", params.id)
+          .order("created_at", { ascending: false }),
       ]);
       if (projetRes.error && projetRes.error.code !== "PGRST116") {
         setError("Impossible de charger le projet.");
@@ -158,6 +169,7 @@ export default function ProjetDetailPage() {
       setProjet(projetRes.data as Projet | null);
       setSessions((sessionsRes.data as SessionHeure[]) ?? []);
       setTransactions((transactionsRes.data as TransactionCA[]) ?? []);
+      setDevisList((devisRes.data as Devis[]) ?? []);
       setError(null);
     } catch {
       setError("Impossible de charger le projet.");
@@ -174,6 +186,17 @@ export default function ProjetDetailPage() {
       toast.error("Erreur", { description: "Impossible de supprimer le paiement." });
     } else {
       toast.success("Paiement supprime");
+      fetchData();
+    }
+  }
+
+  async function handleDeleteDevis(id: string) {
+    const supabase = createClient();
+    const { error } = await supabase.from("devis").delete().eq("id", id);
+    if (error) {
+      toast.error("Erreur", { description: "Impossible de supprimer le devis." });
+    } else {
+      toast.success("Devis supprime");
       fetchData();
     }
   }
@@ -288,7 +311,7 @@ export default function ProjetDetailPage() {
 
   const config = statutConfig[projet.statut];
   const rentabiliteEurH =
-    heuresFacturables > 0 ? totalPaye / heuresFacturables : null;
+    totalHeures > 0 ? totalPaye / totalHeures : null;
   const paiementStatus = paiementBadge(totalPaye, totalCA);
 
   return (
@@ -376,7 +399,7 @@ export default function ProjetDetailPage() {
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <TrendingUp className="size-3.5" />
-              Rentabilite
+              Rentabilite reelle
             </CardDescription>
             <CardTitle className="text-xl">
               {rentabiliteEurH !== null
@@ -432,11 +455,11 @@ export default function ProjetDetailPage() {
               <Separator />
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground">
-                  Calcul de rentabilite
+                  Rentabilite reelle
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {formatEuro(totalPaye)} /{" "}
-                  {heuresFacturables.toFixed(1)}h facturables ={" "}
+                  {totalHeures.toFixed(1)}h total ={" "}
                   <span className="font-medium text-foreground">
                     {formatEuro(rentabiliteEurH)}/h
                   </span>
@@ -447,6 +470,200 @@ export default function ProjetDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Section Devis */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="size-4" />
+            Devis
+          </CardTitle>
+          <CardAction>
+            <Button size="sm" onClick={() => setDevisDialogOpen(true)}>
+              <Plus data-icon="inline-start" />
+              Ajouter un devis
+            </Button>
+          </CardAction>
+          <CardDescription>
+            {formatEuro(projet.montant_devis)} devis signes
+            {projet.reste_a_payer > 0 && ` — ${formatEuro(projet.reste_a_payer)} reste a payer`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {devisList.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center">
+              <FileText className="size-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">
+                Aucun devis enregistre pour ce projet.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {devisList.map((d) => {
+                const devisTransactions = transactions.filter(
+                  (t) => t.devis_id === d.id
+                );
+                const totalPayeDevis = devisTransactions
+                  .filter((t) => t.statut === "paye")
+                  .reduce((sum, t) => sum + t.montant, 0);
+                return (
+                  <div key={d.id} className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <p className="font-medium">{d.libelle}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatEuro(d.montant_total)}
+                            {d.date_signature &&
+                              ` — signe le ${formatDate(d.date_signature)}`}
+                          </p>
+                        </div>
+                        {d.statut === "signe" ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                          >
+                            Signe
+                          </Badge>
+                        ) : d.statut === "en_cours" ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-blue-500/20 text-blue-400 border-blue-500/30"
+                          >
+                            En cours
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant="outline"
+                            className="bg-red-500/20 text-red-400 border-red-500/30"
+                          >
+                            Refuse
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setPaiementDevisId(d.id);
+                            setPaiementDialogOpen(true);
+                          }}
+                        >
+                          <Plus data-icon="inline-start" />
+                          Ajouter un paiement
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger className="text-muted-foreground hover:text-destructive cursor-pointer p-1">
+                            <Trash2 className="size-3.5" />
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>
+                                Supprimer ce devis ?
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Cette action est irreversible. Le devis &quot;{d.libelle}&quot; sera definitivement supprime.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Annuler</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleDeleteDevis(d.id)}
+                                className="bg-destructive text-white hover:bg-destructive/90"
+                              >
+                                Supprimer
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </div>
+                    {devisTransactions.length > 0 ? (
+                      <div className="ml-4 border-l-2 border-border pl-4">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Date</TableHead>
+                              <TableHead className="text-right">
+                                Montant
+                              </TableHead>
+                              <TableHead>Statut</TableHead>
+                              <TableHead>Note</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {devisTransactions.map((t) => (
+                              <TableRow key={t.id}>
+                                <TableCell className="text-muted-foreground">
+                                  {new Date(t.date).toLocaleDateString(
+                                    "fr-FR",
+                                    {
+                                      day: "numeric",
+                                      month: "short",
+                                      year: "numeric",
+                                    }
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right font-medium">
+                                  {formatEuro(t.montant)}
+                                </TableCell>
+                                <TableCell>
+                                  {t.statut === "paye" ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                                    >
+                                      Paye
+                                    </Badge>
+                                  ) : t.statut === "signe" ? (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                    >
+                                      Signe
+                                    </Badge>
+                                  ) : (
+                                    <Badge
+                                      variant="outline"
+                                      className="bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                    >
+                                      En attente
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">
+                                  {t.note || "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Total paye : {formatEuro(totalPayeDevis)} /{" "}
+                          {formatEuro(d.montant_total)}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="ml-4 text-sm text-muted-foreground">
+                        Aucun paiement lie a ce devis.
+                      </p>
+                    )}
+                    {d !== devisList[devisList.length - 1] && <Separator />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <NouveauDevisDialog
+        projetId={projet.id}
+        open={devisDialogOpen}
+        onOpenChange={setDevisDialogOpen}
+        onCreated={fetchData}
+      />
+
       {/* Section Paiements */}
       <Card>
         <CardHeader>
@@ -455,7 +672,7 @@ export default function ProjetDetailPage() {
             Paiements
           </CardTitle>
           <CardAction>
-            <Button size="sm" onClick={() => setPaiementDialogOpen(true)}>
+            <Button size="sm" onClick={() => { setPaiementDevisId(null); setPaiementDialogOpen(true); }}>
               <Plus data-icon="inline-start" />
               Ajouter un paiement
             </Button>
@@ -559,6 +776,7 @@ export default function ProjetDetailPage() {
 
       <NouveauPaiementDialog
         projetId={projet.id}
+        devisId={paiementDevisId}
         open={paiementDialogOpen}
         onOpenChange={setPaiementDialogOpen}
         onCreated={fetchData}

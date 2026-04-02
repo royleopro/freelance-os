@@ -8,6 +8,7 @@ import type {
   TransactionCA,
   SessionHeureAvecProjet,
   Parametre,
+  Objectif,
 } from "@/lib/types";
 import { getEtiquette } from "@/lib/etiquettes";
 import {
@@ -28,10 +29,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Euro,
   TrendingUp,
   Target,
-  ShieldCheck,
+  Landmark,
   Clock,
   FolderKanban,
   AlertCircle,
@@ -41,7 +49,8 @@ import { toast } from "sonner";
 
 const TAUX_URSSAF = 0.256;
 const TAUX_IMPOTS = 0.02;
-
+const CURRENT_YEAR = new Date().getFullYear();
+const YEAR_OPTIONS = ["all", "2024", "2025", "2026"] as const;
 
 function formatEuro(n: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -63,37 +72,40 @@ const MOIS_LABELS = [
 
 export default function DashboardPage() {
   const [projets, setProjets] = useState<Projet[]>([]);
-  const [transactions, setTransactions] = useState<TransactionCA[]>([]);
+  const [allTransactions, setAllTransactions] = useState<TransactionCA[]>([]);
   const [sessions, setSessions] = useState<SessionHeureAvecProjet[]>([]);
   const [parametres, setParametres] = useState<Parametre[]>([]);
+  const [objectifs, setObjectifs] = useState<Objectif[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedYear, setSelectedYear] = useState<string>(String(CURRENT_YEAR));
 
   const fetchData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const year = new Date().getFullYear();
-      const yearStart = `${year}-01-01`;
-      const yearEnd = `${year}-12-31`;
 
-      const [projetsRes, transactionsRes, sessionsRes, paramsRes] =
+      const [projetsRes, transactionsRes, sessionsRes, paramsRes, objectifsRes] =
         await Promise.all([
           supabase.from("projets_with_ca").select("*"),
           supabase
             .from("transactions_ca")
             .select("*")
-            .gte("date", yearStart)
-            .lte("date", yearEnd),
+            .order("date", { ascending: false }),
           supabase
             .from("sessions_heures")
             .select("*, projets(nom, type)")
             .order("date", { ascending: false })
             .limit(200),
           supabase.from("parametres").select("*"),
+          supabase
+            .from("objectifs")
+            .select("*")
+            .eq("annee", CURRENT_YEAR)
+            .order("mois", { ascending: true }),
         ]);
 
       const firstError =
-        projetsRes.error || transactionsRes.error || sessionsRes.error || paramsRes.error;
+        projetsRes.error || transactionsRes.error || sessionsRes.error || paramsRes.error || objectifsRes.error;
       if (firstError) {
         setError("Impossible de charger les donnees du dashboard.");
         toast.error("Erreur de chargement", {
@@ -103,9 +115,10 @@ export default function DashboardPage() {
       }
 
       setProjets((projetsRes.data as Projet[]) ?? []);
-      setTransactions((transactionsRes.data as TransactionCA[]) ?? []);
+      setAllTransactions((transactionsRes.data as TransactionCA[]) ?? []);
       setSessions((sessionsRes.data as SessionHeureAvecProjet[]) ?? []);
       setParametres((paramsRes.data as Parametre[]) ?? []);
+      setObjectifs((objectifsRes.data as Objectif[]) ?? []);
       setError(null);
     } catch {
       setError("Impossible de charger les donnees du dashboard.");
@@ -121,17 +134,34 @@ export default function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  // --- Calculs KPI ---
-  const objectifAnnuel = getParam(parametres, "objectif_ca_annuel", 60000);
-  const moisSurvie = getParam(parametres, "mois_survie", 6);
+  // --- Filter transactions by selected year ---
+  const transactions = useMemo(() => {
+    if (selectedYear === "all") return allTransactions;
+    const year = parseInt(selectedYear);
+    return allTransactions.filter((t) => new Date(t.date).getFullYear() === year);
+  }, [allTransactions, selectedYear]);
 
-  // IDs des projets client uniquement (pour filtrer le CA)
+  const isCurrentYear = selectedYear === String(CURRENT_YEAR);
+
+  // --- Parametres ---
+  const objectifAnnuel = useMemo(() => {
+    if (objectifs.length > 0) {
+      return objectifs.reduce((sum, o) => sum + o.ca_cible, 0);
+    }
+    return getParam(parametres, "objectif_ca_annuel", 60000);
+  }, [objectifs, parametres]);
+
+  const soldeComptePro = getParam(parametres, "solde_compte_pro", 0);
+  const fraisMensuels = getParam(parametres, "frais_mensuels_fixes", 131.67);
+
+  // --- IDs projets client ---
   const clientProjetIds = useMemo(
     () => new Set(projets.filter((p) => p.type === "client").map((p) => p.id)),
     [projets]
   );
 
-  const caPayeAnnee = useMemo(
+  // --- KPI: CA Encaisse (paye) ---
+  const caEncaisse = useMemo(
     () =>
       transactions
         .filter((t) => t.statut === "paye" && clientProjetIds.has(t.projet_id))
@@ -139,15 +169,41 @@ export default function DashboardPage() {
     [transactions, clientProjetIds]
   );
 
-  const progressionCA = objectifAnnuel > 0 ? (caPayeAnnee / objectifAnnuel) * 100 : 0;
+  // --- KPI: CA Devise (signe) ---
+  const caDevise = useMemo(
+    () =>
+      transactions
+        .filter((t) => t.statut === "signe" && clientProjetIds.has(t.projet_id))
+        .reduce((sum, t) => sum + t.montant, 0),
+    [transactions, clientProjetIds]
+  );
 
-  const moisEcoules = new Date().getMonth() + 1;
-  const netMensuelMoyen =
-    moisEcoules > 0
-      ? (caPayeAnnee / moisEcoules) * (1 - TAUX_URSSAF - TAUX_IMPOTS)
-      : 0;
 
-  // Rentabilité moyenne projets actifs (type client uniquement)
+
+  // --- KPI: Net mensuel moyen (current year only, months with CA > 0) ---
+  const netMensuelMoyen = useMemo(() => {
+    const currentYearTransactions = allTransactions.filter(
+      (t) =>
+        new Date(t.date).getFullYear() === CURRENT_YEAR &&
+        t.statut === "paye" &&
+        clientProjetIds.has(t.projet_id)
+    );
+    const caPayeCurrentYear = currentYearTransactions.reduce(
+      (sum, t) => sum + t.montant,
+      0
+    );
+    // Count distinct months with CA paye
+    const moisAvecCA = new Set(
+      currentYearTransactions.map((t) => new Date(t.date).getMonth())
+    );
+    const nbMois = Math.max(moisAvecCA.size, 1);
+    return (caPayeCurrentYear / nbMois) * (1 - TAUX_URSSAF - TAUX_IMPOTS);
+  }, [allTransactions, clientProjetIds]);
+
+  // --- KPI: Tresorerie ---
+  const salaireVersable6m = (soldeComptePro - fraisMensuels * 6) / 6;
+
+  // --- Rentabilite moyenne projets actifs ---
   const projetsActifs = useMemo(
     () => projets.filter((p) => p.statut === "en_cours" && p.type === "client"),
     [projets]
@@ -157,22 +213,22 @@ export default function DashboardPage() {
     if (projetsActifs.length === 0) return null;
     const projetIds = new Set(projetsActifs.map((p) => p.id));
 
-    const heuresFacturablesActifs = sessions
-      .filter((s) => projetIds.has(s.projet_id) && s.facturable)
+    const heuresTotalesActifs = sessions
+      .filter((s) => projetIds.has(s.projet_id))
       .reduce((sum, s) => sum + s.duree, 0);
 
-    const caPayeActifs = transactions
+    const caPayeActifs = allTransactions
       .filter((t) => projetIds.has(t.projet_id) && t.statut === "paye")
       .reduce((sum, t) => sum + t.montant, 0);
 
-    return heuresFacturablesActifs > 0
-      ? caPayeActifs / heuresFacturablesActifs
+    return heuresTotalesActifs > 0
+      ? caPayeActifs / heuresTotalesActifs
       : null;
-  }, [projetsActifs, sessions, transactions]);
+  }, [projetsActifs, sessions, allTransactions]);
 
-  // --- Données graphique CA mensuel (projets client uniquement) ---
+  // --- Chart data (filtered by selected year) ---
   const chartData = useMemo(() => {
-    const objectifMensuel = objectifAnnuel / 12;
+    const objectifMensuel = isCurrentYear ? objectifAnnuel / 12 : 0;
     const parMois = new Array(12).fill(0);
 
     for (const t of transactions) {
@@ -187,23 +243,22 @@ export default function DashboardPage() {
       objectif: Math.round(objectifMensuel),
       paye: Math.round(parMois[i]),
     }));
-  }, [transactions, objectifAnnuel, clientProjetIds]);
+  }, [transactions, objectifAnnuel, clientProjetIds, isCurrentYear]);
 
-  // --- Projets actifs avec stats ---
+  // --- Projets actifs stats ---
   const projetsActifsStats = useMemo(() => {
     return projetsActifs.map((p) => {
       const heures = sessions
-        .filter((s) => s.projet_id === p.id && s.facturable)
+        .filter((s) => s.projet_id === p.id)
         .reduce((sum, s) => sum + s.duree, 0);
-      const paye = transactions
+      const paye = allTransactions
         .filter((t) => t.projet_id === p.id && t.statut === "paye")
         .reduce((sum, t) => sum + t.montant, 0);
       const rentabilite = heures > 0 ? paye / heures : null;
       return { ...p, heures, paye, rentabilite };
     });
-  }, [projetsActifs, sessions, transactions]);
+  }, [projetsActifs, sessions, allTransactions]);
 
-  // --- 5 dernières sessions ---
   const dernieresSessions = sessions.slice(0, 5);
 
   if (loading) {
@@ -235,20 +290,6 @@ export default function DashboardPage() {
             <Skeleton className="h-64 w-full" />
           </CardContent>
         </Card>
-        <div className="grid gap-6 lg:grid-cols-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Skeleton className="h-5 w-36" />
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {Array.from({ length: 3 }).map((_, j) => (
-                  <Skeleton key={j} className="h-4 w-full" />
-                ))}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
       </div>
     );
   }
@@ -270,39 +311,70 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Vue d&apos;ensemble de votre activite freelance.
-        </p>
+      {/* Header + Year selector */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">
+            Vue d&apos;ensemble de votre activite freelance.
+          </p>
+        </div>
+        <Select value={selectedYear} onValueChange={(v) => { if (v) setSelectedYear(v); }}>
+          <SelectTrigger className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {YEAR_OPTIONS.map((y) => (
+              <SelectItem key={y} value={y}>
+                {y === "all" ? "All time" : y}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* CA paye vs objectif */}
-        <Card size="sm">
+        {/* CA — barre a deux segments */}
+        <Card size="sm" className="sm:col-span-2">
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <Target className="size-3.5" />
-              CA paye {new Date().getFullYear()}
+              Chiffre d&apos;affaires
             </CardDescription>
             <CardTitle className="text-xl">
-              {formatEuro(caPayeAnnee)}
+              {formatEuro(caEncaisse + caDevise)}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>{Math.round(progressionCA)}%</span>
-                <span>Obj. {formatEuro(objectifAnnuel)}</span>
+            {isCurrentYear && objectifAnnuel > 0 ? (
+              <div className="space-y-1.5">
+                <div className="h-3 w-full rounded-full bg-muted overflow-hidden flex">
+                  <div
+                    className="h-full bg-emerald-500 transition-all"
+                    style={{ width: `${Math.min((caEncaisse / objectifAnnuel) * 100, 100)}%` }}
+                  />
+                  <div
+                    className="h-full bg-amber-500 transition-all"
+                    style={{ width: `${Math.min((caDevise / objectifAnnuel) * 100, Math.max(100 - (caEncaisse / objectifAnnuel) * 100, 0))}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  <span className="text-emerald-400">{formatEuro(caEncaisse)} encaisses</span>
+                  {" + "}
+                  <span className="text-amber-400">{formatEuro(caDevise)} signes</span>
+                  {" = "}
+                  {formatEuro(caEncaisse + caDevise)} / {formatEuro(objectifAnnuel)} objectif
+                </p>
               </div>
-              <div className="h-2 w-full rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all"
-                  style={{ width: `${Math.min(progressionCA, 100)}%` }}
-                />
-              </div>
-            </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                <span className="text-emerald-400">{formatEuro(caEncaisse)} encaisses</span>
+                {" + "}
+                <span className="text-amber-400">{formatEuro(caDevise)} signes</span>
+                {" — "}{selectedYear === "all" ? "all time" : selectedYear}
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -319,47 +391,33 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              Apres URSSAF ({(TAUX_URSSAF * 100).toFixed(1)}%) + impots (
+              Ref. {CURRENT_YEAR} — apres URSSAF ({(TAUX_URSSAF * 100).toFixed(1)}%) + impots (
               {(TAUX_IMPOTS * 100).toFixed(0)}%)
             </p>
           </CardContent>
         </Card>
 
-        {/* Rentabilité moyenne */}
+        {/* Tresorerie */}
         <Card size="sm">
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
-              <TrendingUp className="size-3.5" />
-              Rentabilite moyenne
+              <Landmark className="size-3.5" />
+              Tresorerie
             </CardDescription>
             <CardTitle className="text-xl">
-              {rentabiliteMoyenne !== null
-                ? formatEuro(rentabiliteMoyenne) + "/h"
-                : "—"}
+              {formatEuro(soldeComptePro)}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              Sur {projetsActifs.length} projet
-              {projetsActifs.length > 1 ? "s" : ""} actif
-              {projetsActifs.length > 1 ? "s" : ""}
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Mois de survie */}
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription className="flex items-center gap-1.5">
-              <ShieldCheck className="size-3.5" />
-              Mois de survie
-            </CardDescription>
-            <CardTitle className="text-xl">{moisSurvie} mois</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xs text-muted-foreground">
-              Tresorerie de securite
-            </p>
+            <div className="space-y-0.5 text-xs text-muted-foreground">
+              <p>
+                Salaire versable /6m :{" "}
+                <span className={salaireVersable6m >= 0 ? "text-emerald-400" : "text-red-400"}>
+                  {formatEuro(salaireVersable6m)}
+                </span>
+              </p>
+              <p>Frais mensuels : {formatEuro(fraisMensuels)}</p>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -367,9 +425,13 @@ export default function DashboardPage() {
       {/* Graphique CA mensuel */}
       <Card>
         <CardHeader>
-          <CardTitle>CA mensuel {new Date().getFullYear()}</CardTitle>
+          <CardTitle>
+            CA mensuel {selectedYear === "all" ? "— All time" : selectedYear}
+          </CardTitle>
           <CardDescription>
-            Objectif vs CA reellement paye par mois
+            {isCurrentYear
+              ? "Objectif vs CA reellement paye par mois"
+              : "CA paye par mois"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -385,6 +447,12 @@ export default function DashboardPage() {
               <FolderKanban className="size-4" />
               Projets clients actifs
             </CardTitle>
+            {rentabiliteMoyenne !== null && (
+              <CardDescription className="flex items-center gap-1.5">
+                <TrendingUp className="size-3" />
+                Rentabilite reelle : {formatEuro(rentabiliteMoyenne)}/h
+              </CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             {projetsActifsStats.length === 0 ? (
@@ -407,7 +475,7 @@ export default function DashboardPage() {
                     <TableHead>Projet</TableHead>
                     <TableHead className="text-right">Paye</TableHead>
                     <TableHead className="text-right">Heures</TableHead>
-                    <TableHead className="text-right">€/h</TableHead>
+                    <TableHead className="text-right">EUR/h</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -440,7 +508,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Dernières sessions */}
+        {/* Dernieres sessions */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

@@ -45,6 +45,20 @@ export interface Projet {
   montant_paye: number;
   montant_signe: number;
   montant_total: number;
+  montant_devis: number;
+  reste_a_payer: number;
+}
+
+export type DevisStatut = "en_cours" | "signe" | "refuse";
+
+export interface Devis {
+  id: string;
+  projet_id: string;
+  libelle: string;
+  montant_total: number;
+  statut: DevisStatut;
+  date_signature: string | null;
+  created_at: string;
 }
 
 export interface SessionHeure {
@@ -66,6 +80,7 @@ export type TransactionStatut = "paye" | "signe" | "en_attente";
 export interface TransactionCA {
   id: string;
   projet_id: string;
+  devis_id: string | null;
   libelle: string;
   montant: number;
   date: string;

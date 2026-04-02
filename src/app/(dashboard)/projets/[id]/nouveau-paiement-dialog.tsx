@@ -25,6 +25,7 @@ import {
 
 interface NouveauPaiementDialogProps {
   projetId: string;
+  devisId?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
@@ -43,6 +44,7 @@ const defaultForm = {
 
 export function NouveauPaiementDialog({
   projetId,
+  devisId,
   open,
   onOpenChange,
   onCreated,
@@ -62,6 +64,7 @@ export function NouveauPaiementDialog({
     const supabase = createClient();
     const { error } = await supabase.from("transactions_ca").insert({
       projet_id: projetId,
+      devis_id: devisId ?? null,
       montant: parseFloat(form.montant),
       date: form.date,
       statut: form.statut,
