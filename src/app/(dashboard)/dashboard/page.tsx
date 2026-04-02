@@ -47,8 +47,6 @@ import {
 import { CaMensuelChart } from "./ca-mensuel-chart";
 import { toast } from "sonner";
 
-const TAUX_URSSAF = 0.256;
-const TAUX_IMPOTS = 0.02;
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = ["all", "2024", "2025", "2026"] as const;
 
@@ -154,6 +152,13 @@ export default function DashboardPage() {
   const soldeComptePro = getParam(parametres, "solde_compte_pro", 0);
   const fraisMensuels = getParam(parametres, "frais_mensuels_fixes", 131.67);
 
+  // Taux dynamiques depuis la table parametres
+  const tauxUrssafParam = parametres.find((p) => p.cle === "taux_urssaf");
+  const tauxImpotsParam = parametres.find((p) => p.cle === "taux_impots");
+  const hasTaux = tauxUrssafParam != null && tauxImpotsParam != null;
+  const tauxUrssaf = hasTaux ? parseFloat(tauxUrssafParam.valeur) : 0;
+  const tauxImpots = hasTaux ? parseFloat(tauxImpotsParam.valeur) : 0;
+
   // --- IDs projets client ---
   const clientProjetIds = useMemo(
     () => new Set(projets.filter((p) => p.type === "client").map((p) => p.id)),
@@ -182,6 +187,7 @@ export default function DashboardPage() {
 
   // --- KPI: Net mensuel moyen (current year only, months with CA > 0) ---
   const netMensuelMoyen = useMemo(() => {
+    if (!hasTaux) return 0;
     const currentYearTransactions = allTransactions.filter(
       (t) =>
         new Date(t.date).getFullYear() === CURRENT_YEAR &&
@@ -197,8 +203,8 @@ export default function DashboardPage() {
       currentYearTransactions.map((t) => new Date(t.date).getMonth())
     );
     const nbMois = Math.max(moisAvecCA.size, 1);
-    return (caPayeCurrentYear / nbMois) * (1 - TAUX_URSSAF - TAUX_IMPOTS);
-  }, [allTransactions, clientProjetIds]);
+    return (caPayeCurrentYear / nbMois) * (1 - tauxUrssaf - tauxImpots);
+  }, [allTransactions, clientProjetIds, hasTaux, tauxUrssaf, tauxImpots]);
 
   // --- KPI: Tresorerie ---
   const salaireVersable6m = (soldeComptePro - fraisMensuels * 6) / 6;
@@ -386,14 +392,23 @@ export default function DashboardPage() {
               Net mensuel moyen
             </CardDescription>
             <CardTitle className="text-xl">
-              {formatEuro(netMensuelMoyen)}
+              {hasTaux ? formatEuro(netMensuelMoyen) : "—"}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              Ref. {CURRENT_YEAR} — apres URSSAF ({(TAUX_URSSAF * 100).toFixed(1)}%) + impots (
-              {(TAUX_IMPOTS * 100).toFixed(0)}%)
-            </p>
+            {hasTaux ? (
+              <p className="text-xs text-muted-foreground">
+                Ref. {CURRENT_YEAR} — apres URSSAF ({(tauxUrssaf * 100).toFixed(1)}%) + impots (
+                {(tauxImpots * 100).toFixed(0)}%)
+              </p>
+            ) : (
+              <Link
+                href="/parametres"
+                className="text-xs text-amber-400 hover:underline"
+              >
+                Configurez vos taux dans les parametres
+              </Link>
+            )}
           </CardContent>
         </Card>
 
