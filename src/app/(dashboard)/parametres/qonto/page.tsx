@@ -29,7 +29,7 @@ import {
   RefreshCw,
   Save,
   CheckCircle2,
-  AlertCircle,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -46,10 +46,8 @@ function formatEuro(n: number) {
 }
 
 interface SyncResult {
-  imported: number;
-  updated: number;
-  skipped: number;
-  total: number;
+  transactions: { imported: number; updated: number; skipped: number; total: number };
+  factures: { imported: number; updated: number; error?: string | null };
 }
 
 export default function QontoPage() {
@@ -64,14 +62,14 @@ export default function QontoPage() {
   });
 
   const [lastSync, setLastSync] = useState<string | null>(null);
-  const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(
-    null
-  );
+  const [lastSyncResult, setLastSyncResult] = useState<SyncResult | null>(null);
   const [recentTx, setRecentTx] = useState<TransactionCA[]>([]);
+  const [qontoInvoices, setQontoInvoices] = useState<TransactionCA[]>([]);
+  const [showAllInvoices, setShowAllInvoices] = useState(false);
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
-    const [paramsRes, txRes] = await Promise.all([
+    const [paramsRes, txRes, invoicesRes] = await Promise.all([
       supabase.from("parametres").select("*"),
       supabase
         .from("transactions_ca")
@@ -79,6 +77,11 @@ export default function QontoPage() {
         .eq("source", "qonto")
         .order("created_at", { ascending: false })
         .limit(10),
+      supabase
+        .from("transactions_ca")
+        .select("*")
+        .eq("source", "qonto_invoice")
+        .order("created_at", { ascending: false }),
     ]);
 
     const params = (paramsRes.data as Parametre[]) ?? [];
@@ -101,6 +104,7 @@ export default function QontoPage() {
     }
 
     setRecentTx((txRes.data as TransactionCA[]) ?? []);
+    setQontoInvoices((invoicesRes.data as TransactionCA[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -140,8 +144,10 @@ export default function QontoPage() {
           description: data.error || "Erreur inconnue",
         });
       } else {
+        const tx = data.transactions;
+        const fct = data.factures;
         toast.success("Synchronisation terminee", {
-          description: `${data.imported} importee${data.imported > 1 ? "s" : ""}, ${data.updated} mise${data.updated > 1 ? "s" : ""} a jour, ${data.skipped} ignoree${data.skipped > 1 ? "s" : ""}`,
+          description: `Transactions: ${tx.imported} importees, ${tx.updated} MAJ — Factures: ${fct.imported} importees, ${fct.updated} MAJ`,
         });
         fetchData();
       }
@@ -192,7 +198,7 @@ export default function QontoPage() {
         <div>
           <h1 className="text-2xl font-bold">Integration Qonto</h1>
           <p className="text-muted-foreground">
-            Synchronisez vos transactions bancaires automatiquement.
+            Synchronisez vos transactions et factures automatiquement.
           </p>
         </div>
       </div>
@@ -260,23 +266,13 @@ export default function QontoPage() {
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
-                {lastSyncResult && (
-                  <span className="ml-2">
-                    — {lastSyncResult.imported} importee
-                    {lastSyncResult.imported > 1 ? "s" : ""},{" "}
-                    {lastSyncResult.updated} mise
-                    {lastSyncResult.updated > 1 ? "s" : ""} a jour,{" "}
-                    {lastSyncResult.skipped} ignoree
-                    {lastSyncResult.skipped > 1 ? "s" : ""}
-                  </span>
-                )}
               </>
             ) : (
               "Aucune synchronisation effectuee."
             )}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <Button
             onClick={handleSync}
             disabled={
@@ -290,8 +286,29 @@ export default function QontoPage() {
             {syncing ? "Synchronisation en cours..." : "Synchroniser avec Qonto"}
           </Button>
 
+          {lastSyncResult && lastSyncResult.transactions && (
+            <div className="grid gap-3 sm:grid-cols-2 text-sm">
+              <div className="rounded-lg border p-3 space-y-1">
+                <p className="font-medium">Transactions</p>
+                <p className="text-muted-foreground">
+                  {lastSyncResult.transactions.imported} importees, {lastSyncResult.transactions.updated} MAJ, {lastSyncResult.transactions.skipped} ignorees
+                </p>
+              </div>
+              <div className="rounded-lg border p-3 space-y-1">
+                <p className="font-medium">Factures</p>
+                {lastSyncResult.factures?.error ? (
+                  <p className="text-red-400 text-xs">{lastSyncResult.factures.error}</p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    {lastSyncResult.factures?.imported ?? 0} importees, {lastSyncResult.factures?.updated ?? 0} MAJ
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {!form.qonto_login && !form.qonto_secret_key && (
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Configurez vos identifiants ci-dessus pour activer la
               synchronisation.
             </p>
@@ -299,10 +316,75 @@ export default function QontoPage() {
         </CardContent>
       </Card>
 
+      {/* Factures Qonto */}
+      {qontoInvoices.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="size-4" />
+              Factures Qonto
+            </CardTitle>
+            <CardDescription>
+              {qontoInvoices.length} facture{qontoInvoices.length > 1 ? "s" : ""} importee{qontoInvoices.length > 1 ? "s" : ""} depuis Qonto.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Numero</TableHead>
+                  <TableHead className="text-right">Montant</TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead>Date</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(showAllInvoices ? qontoInvoices : qontoInvoices.slice(0, 5)).map((inv) => (
+                  <TableRow key={inv.id}>
+                    <TableCell className="font-medium">{inv.libelle || "—"}</TableCell>
+                    <TableCell className="text-right">{formatEuro(inv.montant)}</TableCell>
+                    <TableCell>
+                      {inv.statut === "paye" ? (
+                        <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                          Paye
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-amber-500/20 text-amber-400 border-amber-500/30">
+                          En attente
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {inv.date_paiement
+                        ? new Date(inv.date_paiement).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })
+                        : new Date(inv.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {qontoInvoices.length > 5 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowAllInvoices(!showAllInvoices)}
+              >
+                {showAllInvoices
+                  ? "Afficher moins"
+                  : `Voir toutes (${qontoInvoices.length})`}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Recent Qonto transactions */}
       <Card>
         <CardHeader>
-          <CardTitle>Dernieres transactions Qonto</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <CheckCircle2 className="size-4" />
+            Dernieres transactions Qonto
+          </CardTitle>
           <CardDescription>
             Les 10 dernieres transactions importees depuis Qonto.
           </CardDescription>
@@ -319,22 +401,15 @@ export default function QontoPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-8" />
                   <TableHead>Libelle</TableHead>
                   <TableHead className="text-right">Montant</TableHead>
                   <TableHead>Statut</TableHead>
                   <TableHead>Date paiement</TableHead>
-                  <TableHead className="text-muted-foreground">
-                    Qonto ID
-                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {recentTx.map((tx) => (
                   <TableRow key={tx.id}>
-                    <TableCell>
-                      <CheckCircle2 className="size-3.5 text-emerald-400" />
-                    </TableCell>
                     <TableCell className="font-medium">
                       {tx.libelle || "—"}
                     </TableCell>
@@ -348,13 +423,6 @@ export default function QontoPage() {
                           className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
                         >
                           Paye
-                        </Badge>
-                      ) : tx.statut === "signe" ? (
-                        <Badge
-                          variant="outline"
-                          className="bg-blue-500/20 text-blue-400 border-blue-500/30"
-                        >
-                          Signe
                         </Badge>
                       ) : (
                         <Badge
@@ -376,9 +444,6 @@ export default function QontoPage() {
                             }
                           )
                         : "—"}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono truncate max-w-32">
-                      {tx.qonto_id || "—"}
                     </TableCell>
                   </TableRow>
                 ))}

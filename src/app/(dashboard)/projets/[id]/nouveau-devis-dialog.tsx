@@ -37,8 +37,11 @@ function todayStr(): string {
 const defaultForm = {
   libelle: "",
   montant_total: "",
+  jours_signes: "",
   statut: "signe" as DevisStatut,
   date_signature: todayStr(),
+  date_debut: "",
+  date_fin: "",
 };
 
 export function NouveauDevisDialog({
@@ -64,8 +67,11 @@ export function NouveauDevisDialog({
       projet_id: projetId,
       libelle: form.libelle.trim(),
       montant_total: parseFloat(form.montant_total),
+      jours_signes: form.jours_signes ? parseFloat(form.jours_signes) : 0,
       statut: form.statut,
       date_signature: form.statut === "signe" ? form.date_signature : null,
+      date_debut: form.date_debut || null,
+      date_fin: form.date_fin || null,
     });
     setSaving(false);
 
@@ -116,6 +122,26 @@ export function NouveauDevisDialog({
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="jours-signes">Jours signes</Label>
+              <Input
+                id="jours-signes"
+                type="number"
+                min="0"
+                step="0.5"
+                placeholder="Ex: 10"
+                value={form.jours_signes}
+                onChange={(e) => update("jours_signes", e.target.value)}
+              />
+              {form.jours_signes && (
+                <p className="text-xs text-muted-foreground">
+                  = {(parseFloat(form.jours_signes) * 8).toFixed(0)}h
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
               <Label>Statut</Label>
               <Select
                 value={form.statut}
@@ -133,19 +159,39 @@ export function NouveauDevisDialog({
                 </SelectContent>
               </Select>
             </div>
+            {form.statut === "signe" && (
+              <div className="space-y-2">
+                <Label htmlFor="date-signature">Date de signature</Label>
+                <Input
+                  id="date-signature"
+                  type="date"
+                  value={form.date_signature}
+                  onChange={(e) => update("date_signature", e.target.value)}
+                />
+              </div>
+            )}
           </div>
 
-          {form.statut === "signe" && (
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="date-signature">Date de signature</Label>
+              <Label htmlFor="date-debut-devis">Date debut</Label>
               <Input
-                id="date-signature"
+                id="date-debut-devis"
                 type="date"
-                value={form.date_signature}
-                onChange={(e) => update("date_signature", e.target.value)}
+                value={form.date_debut}
+                onChange={(e) => update("date_debut", e.target.value)}
               />
             </div>
-          )}
+            <div className="space-y-2">
+              <Label htmlFor="date-fin-devis">Date fin</Label>
+              <Input
+                id="date-fin-devis"
+                type="date"
+                value={form.date_fin}
+                onChange={(e) => update("date_fin", e.target.value)}
+              />
+            </div>
+          </div>
 
           <DialogFooter>
             <Button

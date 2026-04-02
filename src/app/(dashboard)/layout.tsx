@@ -1,5 +1,6 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { BackupReminder } from "@/components/backup-reminder";
 
 export default function DashboardLayout({
   children,
@@ -15,6 +16,7 @@ export default function DashboardLayout({
         </header>
         <div className="flex-1 p-6">{children}</div>
       </main>
+      <BackupReminder />
     </SidebarProvider>
   );
 }

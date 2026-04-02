@@ -15,7 +15,14 @@ interface ChartDataItem {
   mois: string;
   objectif: number;
   paye: number;
+  en_attente: number;
 }
+
+const LABELS: Record<string, string> = {
+  objectif: "Objectif",
+  paye: "Paye",
+  en_attente: "En attente",
+};
 
 function formatEuroShort(n: number) {
   if (n >= 1000) return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
@@ -37,7 +44,7 @@ function CustomTooltip({
       <p className="font-medium mb-1">{label}</p>
       {payload.map((entry) => (
         <p key={entry.dataKey} style={{ color: entry.color }}>
-          {entry.dataKey === "objectif" ? "Objectif" : "Paye"} :{" "}
+          {LABELS[entry.dataKey] ?? entry.dataKey} :{" "}
           {new Intl.NumberFormat("fr-FR", {
             style: "currency",
             currency: "EUR",
@@ -72,9 +79,7 @@ export function CaMensuelChart({ data }: { data: ChartDataItem[] }) {
         />
         <Tooltip content={<CustomTooltip />} cursor={{ fill: "hsl(0 0% 15%)" }} />
         <Legend
-          formatter={(value: string) =>
-            value === "objectif" ? "Objectif" : "Paye"
-          }
+          formatter={(value: string) => LABELS[value] ?? value}
           wrapperStyle={{ fontSize: 12 }}
         />
         <Bar
@@ -86,6 +91,12 @@ export function CaMensuelChart({ data }: { data: ChartDataItem[] }) {
         <Bar
           dataKey="paye"
           fill="hsl(152 60% 50%)"
+          radius={[4, 4, 0, 0]}
+          maxBarSize={32}
+        />
+        <Bar
+          dataKey="en_attente"
+          fill="#fbbf24"
           radius={[4, 4, 0, 0]}
           maxBarSize={32}
         />

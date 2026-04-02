@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Parametre, Objectif } from "@/lib/types";
+import type { Parametre } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,38 +13,10 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Save, Settings, Target, AlertCircle, Upload, RefreshCw } from "lucide-react";
+import { Save, Settings, AlertCircle, Upload, RefreshCw, Download, HardDrive } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-
-const MOIS_LABELS = [
-  "Janvier", "Fevrier", "Mars", "Avril", "Mai", "Juin",
-  "Juillet", "Aout", "Septembre", "Octobre", "Novembre", "Decembre",
-];
-
-const DEFAULT_OBJECTIFS = [
-  { ca_cible: 4000, tjm_cible: 350, jours_cibles: 11.4 },
-  { ca_cible: 4400, tjm_cible: 400, jours_cibles: 11 },
-  { ca_cible: 4800, tjm_cible: 400, jours_cibles: 12 },
-  { ca_cible: 5400, tjm_cible: 450, jours_cibles: 12 },
-  { ca_cible: 5850, tjm_cible: 450, jours_cibles: 13 },
-  { ca_cible: 5850, tjm_cible: 450, jours_cibles: 13 },
-  { ca_cible: 2250, tjm_cible: 450, jours_cibles: 5 },
-  { ca_cible: 2250, tjm_cible: 450, jours_cibles: 5 },
-  { ca_cible: 4950, tjm_cible: 450, jours_cibles: 11 },
-  { ca_cible: 5400, tjm_cible: 450, jours_cibles: 12 },
-  { ca_cible: 5400, tjm_cible: 450, jours_cibles: 12 },
-  { ca_cible: 5400, tjm_cible: 450, jours_cibles: 12 },
-];
 
 interface FinanceForm {
   taux_urssaf: string;
@@ -54,22 +26,18 @@ interface FinanceForm {
   solde_compte_pro: string;
 }
 
-interface ObjectifRow {
-  mois: number;
-  ca_cible: string;
-  tjm_cible: string;
-  jours_cibles: string;
-}
-
 function getParam(params: Parametre[], cle: string, fallback: string): string {
   return params.find((p) => p.cle === cle)?.valeur ?? fallback;
 }
+
+const BACKUP_LS_KEY = "freelance-os-last-backup";
 
 export default function ParametresPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingFinance, setSavingFinance] = useState(false);
-  const [savingObjectifs, setSavingObjectifs] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [lastBackup, setLastBackup] = useState<string | null>(null);
 
   const [finance, setFinance] = useState<FinanceForm>({
     taux_urssaf: "0.256",
@@ -79,30 +47,20 @@ export default function ParametresPage() {
     solde_compte_pro: "0",
   });
 
-  const [objectifs, setObjectifs] = useState<ObjectifRow[]>([]);
-
-  const year = new Date().getFullYear();
-
   const fetchData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const [paramsRes, objectifsRes] = await Promise.all([
-        supabase.from("parametres").select("*"),
-        supabase
-          .from("objectifs")
-          .select("*")
-          .eq("annee", year)
-          .order("mois", { ascending: true }),
-      ]);
+      const { data, error: fetchError } = await supabase
+        .from("parametres")
+        .select("*");
 
-      const firstError = paramsRes.error || objectifsRes.error;
-      if (firstError) {
+      if (fetchError) {
         setError("Impossible de charger les parametres.");
-        toast.error("Erreur de chargement", { description: firstError.message });
+        toast.error("Erreur de chargement", { description: fetchError.message });
         return;
       }
 
-      const params = (paramsRes.data as Parametre[]) ?? [];
+      const params = (data as Parametre[]) ?? [];
       setFinance({
         taux_urssaf: getParam(params, "taux_urssaf", "0.256"),
         taux_impots: getParam(params, "taux_impots", "0.02"),
@@ -110,20 +68,6 @@ export default function ParametresPage() {
         frais_mensuels_fixes: getParam(params, "frais_mensuels_fixes", "131.67"),
         solde_compte_pro: getParam(params, "solde_compte_pro", "0"),
       });
-
-      const dbObjectifs = (objectifsRes.data as Objectif[]) ?? [];
-      const rows: ObjectifRow[] = [];
-      for (let m = 1; m <= 12; m++) {
-        const existing = dbObjectifs.find((o) => o.mois === m);
-        const defaults = DEFAULT_OBJECTIFS[m - 1];
-        rows.push({
-          mois: m,
-          ca_cible: String(existing?.ca_cible ?? defaults.ca_cible),
-          tjm_cible: String(existing?.tjm_cible ?? defaults.tjm_cible),
-          jours_cibles: String(existing?.jours_cibles ?? defaults.jours_cibles),
-        });
-      }
-      setObjectifs(rows);
       setError(null);
     } catch {
       setError("Impossible de charger les parametres.");
@@ -131,26 +75,40 @@ export default function ParametresPage() {
     } finally {
       setLoading(false);
     }
-  }, [year]);
+  }, []);
 
   useEffect(() => {
     fetchData();
+    setLastBackup(localStorage.getItem(BACKUP_LS_KEY));
   }, [fetchData]);
+
+  async function handleDownloadBackup() {
+    setDownloading(true);
+    try {
+      const res = await fetch("/api/backup");
+      if (!res.ok) throw new Error("Erreur serveur");
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const date = new Date().toISOString().split("T")[0];
+      a.href = url;
+      a.download = `freelance-os-backup-${date}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      const now = new Date().toISOString();
+      localStorage.setItem(BACKUP_LS_KEY, now);
+      setLastBackup(now);
+      toast.success("Sauvegarde telechargee");
+    } catch {
+      toast.error("Erreur", { description: "Impossible de telecharger la sauvegarde." });
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   function updateFinance(field: keyof FinanceForm, value: string) {
     setFinance((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function updateObjectif(
-    index: number,
-    field: "ca_cible" | "tjm_cible" | "jours_cibles",
-    value: string
-  ) {
-    setObjectifs((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
-      return next;
-    });
   }
 
   async function saveFinance() {
@@ -169,31 +127,6 @@ export default function ParametresPage() {
     setSavingFinance(false);
     toast.success("Parametres financiers sauvegardes");
   }
-
-  async function saveObjectifs() {
-    setSavingObjectifs(true);
-    const supabase = createClient();
-
-    const rows = objectifs.map((o) => ({
-      annee: year,
-      mois: o.mois,
-      ca_cible: parseFloat(o.ca_cible) || 0,
-      tjm_cible: parseFloat(o.tjm_cible) || 0,
-      jours_cibles: parseFloat(o.jours_cibles) || 0,
-    }));
-
-    await supabase
-      .from("objectifs")
-      .upsert(rows, { onConflict: "annee,mois" });
-
-    setSavingObjectifs(false);
-    toast.success("Objectifs sauvegardes");
-  }
-
-  const totalCaCible = objectifs.reduce(
-    (sum, o) => sum + (parseFloat(o.ca_cible) || 0),
-    0
-  );
 
   if (loading) {
     return (
@@ -216,22 +149,6 @@ export default function ParametresPage() {
                 </div>
               ))}
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-36" />
-            <Skeleton className="h-4 w-48" />
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-9 w-28" />
-                <Skeleton className="h-9 w-28" />
-                <Skeleton className="h-9 w-24" />
-              </div>
-            ))}
           </CardContent>
         </Card>
       </div>
@@ -263,18 +180,17 @@ export default function ParametresPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" render={<Link href="/parametres/qonto" />}>
+          <Button variant="outline" nativeButton={false} render={<Link href="/parametres/qonto" />}>
             <RefreshCw data-icon="inline-start" />
             Qonto
           </Button>
-          <Button variant="outline" render={<Link href="/parametres/import" />}>
+          <Button variant="outline" nativeButton={false} render={<Link href="/parametres/import" />}>
             <Upload data-icon="inline-start" />
             Import CSV
           </Button>
         </div>
       </div>
 
-      {/* Section 1 : Parametres financiers */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -372,83 +288,29 @@ export default function ParametresPage() {
         </CardContent>
       </Card>
 
-      {/* Section 2 : Objectifs CA annuels */}
+      {/* Section Sauvegardes */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Target className="size-4" />
-            Objectifs CA {year}
+            <HardDrive className="size-4" />
+            Sauvegardes
           </CardTitle>
           <CardDescription>
-            Total CA cible :{" "}
-            {new Intl.NumberFormat("fr-FR", {
-              style: "currency",
-              currency: "EUR",
-              maximumFractionDigits: 0,
-            }).format(totalCaCible)}
+            Exportez toutes vos donnees en JSON.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Mois</TableHead>
-                <TableHead>CA cible (EUR)</TableHead>
-                <TableHead>TJM cible (EUR)</TableHead>
-                <TableHead>Jours cibles</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {objectifs.map((o, i) => (
-                <TableRow key={o.mois}>
-                  <TableCell className="font-medium">
-                    {MOIS_LABELS[o.mois - 1]}
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="1"
-                      className="w-28"
-                      value={o.ca_cible}
-                      onChange={(e) =>
-                        updateObjectif(i, "ca_cible", e.target.value)
-                      }
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="1"
-                      className="w-28"
-                      value={o.tjm_cible}
-                      onChange={(e) =>
-                        updateObjectif(i, "tjm_cible", e.target.value)
-                      }
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      className="w-24"
-                      value={o.jours_cibles}
-                      onChange={(e) =>
-                        updateObjectif(i, "jours_cibles", e.target.value)
-                      }
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          <Button onClick={saveObjectifs} disabled={savingObjectifs}>
-            <Save data-icon="inline-start" />
-            {savingObjectifs ? "Enregistrement..." : "Sauvegarder tout"}
-          </Button>
+          <div className="flex items-center gap-4">
+            <Button onClick={handleDownloadBackup} disabled={downloading}>
+              <Download data-icon="inline-start" />
+              {downloading ? "Telechargement..." : "Telecharger une sauvegarde maintenant"}
+            </Button>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {lastBackup
+              ? `Derniere sauvegarde : ${new Date(lastBackup).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}`
+              : "Aucune sauvegarde effectuee."}
+          </p>
         </CardContent>
       </Card>
     </div>

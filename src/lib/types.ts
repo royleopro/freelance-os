@@ -53,11 +53,16 @@ export type DevisStatut = "en_cours" | "signe" | "refuse";
 
 export interface Devis {
   id: string;
-  projet_id: string;
+  projet_id: string | null;
   libelle: string;
   montant_total: number;
+  jours_signes: number;
   statut: DevisStatut;
   date_signature: string | null;
+  date_debut: string | null;
+  date_fin: string | null;
+  qonto_id: string | null;
+  source: string;
   created_at: string;
 }
 

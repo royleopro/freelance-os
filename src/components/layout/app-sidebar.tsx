@@ -5,7 +5,9 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   FolderKanban,
+  FileText,
   Clock,
+  Target,
   Settings,
 } from "lucide-react";
 import {
@@ -23,7 +25,9 @@ import {
 const navItems = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Projets", href: "/projets", icon: FolderKanban },
+  { title: "Devis", href: "/devis", icon: FileText },
   { title: "Heures", href: "/heures", icon: Clock },
+  { title: "Objectifs", href: "/objectifs", icon: Target },
   { title: "Paramètres", href: "/parametres", icon: Settings },
 ];
 

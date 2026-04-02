@@ -13,6 +13,7 @@ import type {
   Devis,
 } from "@/lib/types";
 import { getEtiquette } from "@/lib/etiquettes";
+import { computeHeuresParDevis } from "@/lib/heures-par-devis";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +46,7 @@ import {
   Wallet,
   AlertCircle,
   Trash2,
+  Link2,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -62,6 +64,7 @@ import {
 import { NouveauPaiementDialog } from "./nouveau-paiement-dialog";
 import { NouveauDevisDialog } from "./nouveau-devis-dialog";
 import { ProjetDialog } from "../projet-dialog";
+import { GererPaiementsDialog } from "@/components/gerer-paiements-dialog";
 
 const typeConfig: Record<ProjetType, { label: string; className: string }> = {
   client: {
@@ -117,6 +120,18 @@ function formatDate(d: string | null) {
   });
 }
 
+function progressColor(pct: number): string {
+  if (pct > 100) return "bg-red-500";
+  if (pct >= 80) return "bg-amber-500";
+  return "bg-emerald-500";
+}
+
+function progressTextColor(pct: number): string {
+  if (pct > 100) return "text-red-400";
+  if (pct >= 80) return "text-amber-400";
+  return "text-emerald-400";
+}
+
 function paiementBadge(totalPaye: number, totalCA: number) {
   if (totalCA <= 0)
     return { label: "—", className: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30" };
@@ -139,17 +154,21 @@ export default function ProjetDetailPage() {
   const [paiementDevisId, setPaiementDevisId] = useState<string | null>(null);
   const [devisDialogOpen, setDevisDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [paiementsDevis, setPaiementsDevis] = useState<Devis | null>(null);
+  const [unlinkedQontoDevis, setUnlinkedQontoDevis] = useState<Devis[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
       const supabase = createClient();
-      const [projetRes, sessionsRes, transactionsRes, devisRes] = await Promise.all([
+
+      const [projetRes, sessionsRes, transactionsRes, devisRes, qontoDevisRes] = await Promise.all([
         supabase.from("projets_with_ca").select("*").eq("id", params.id).single(),
         supabase
           .from("sessions_heures")
-          .select("*")
+          .select("*", { count: "exact" })
           .eq("projet_id", params.id)
-          .order("date", { ascending: false }),
+          .order("date", { ascending: false })
+          .limit(5000),
         supabase
           .from("transactions_ca")
           .select("*")
@@ -159,6 +178,12 @@ export default function ProjetDetailPage() {
           .from("devis")
           .select("*")
           .eq("projet_id", params.id)
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("devis")
+          .select("*")
+          .eq("source", "qonto")
+          .is("projet_id", null)
           .order("created_at", { ascending: false }),
       ]);
       if (projetRes.error && projetRes.error.code !== "PGRST116") {
@@ -170,6 +195,7 @@ export default function ProjetDetailPage() {
       setSessions((sessionsRes.data as SessionHeure[]) ?? []);
       setTransactions((transactionsRes.data as TransactionCA[]) ?? []);
       setDevisList((devisRes.data as Devis[]) ?? []);
+      setUnlinkedQontoDevis((qontoDevisRes.data as Devis[]) ?? []);
       setError(null);
     } catch {
       setError("Impossible de charger le projet.");
@@ -201,6 +227,20 @@ export default function ProjetDetailPage() {
     }
   }
 
+  async function handleLinkQontoDevis(devisId: string) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("devis")
+      .update({ projet_id: params.id })
+      .eq("id", devisId);
+    if (error) {
+      toast.error("Erreur", { description: "Impossible de lier le devis." });
+    } else {
+      toast.success("Devis lie au projet");
+      fetchData();
+    }
+  }
+
   async function handleDeleteSession(id: string) {
     const supabase = createClient();
     const { error } = await supabase.from("sessions_heures").delete().eq("id", id);
@@ -226,6 +266,20 @@ export default function ProjetDetailPage() {
   const totalPaye = projet?.montant_paye ?? 0;
   const totalSigne = projet?.montant_signe ?? 0;
   const totalCA = projet?.montant_total ?? 0;
+
+  // Heures signees vs passees
+  const totalJoursSignes = devisList
+    .filter((d) => d.statut === "signe")
+    .reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
+  const totalHeuresSignees = totalJoursSignes * 8;
+  const pctAvancement = totalHeuresSignees > 0 ? (heuresFacturables / totalHeuresSignees) * 100 : 0;
+
+  // Attribution chronologique des heures facturables par devis
+  const heuresAttribueesParDevis = computeHeuresParDevis(
+    devisList,
+    sessions.map((s) => ({ date: s.date, duree: s.duree, facturable: s.facturable, projet_id: params.id })),
+    params.id
+  );
 
   if (loading) {
     return (
@@ -410,6 +464,39 @@ export default function ProjetDetailPage() {
         </Card>
       </div>
 
+      {/* Recap avancement heures */}
+      {totalJoursSignes > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="size-4" />
+              Avancement heures
+            </CardTitle>
+            <CardDescription>
+              {totalJoursSignes}j signes ({totalHeuresSignees}h) — {heuresFacturables.toFixed(1)}h facturables / {totalHeures.toFixed(1)}h total
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="h-3 flex-1 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${progressColor(pctAvancement)}`}
+                  style={{ width: `${Math.min(pctAvancement, 100)}%` }}
+                />
+              </div>
+              <span className={`text-sm font-bold ${progressTextColor(pctAvancement)}`}>
+                {pctAvancement.toFixed(0)}%
+              </span>
+            </div>
+            {pctAvancement > 100 && (
+              <p className="text-xs text-red-400">
+                Depassement de {(heuresFacturables - totalHeuresSignees).toFixed(1)}h
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Informations</CardTitle>
@@ -505,6 +592,10 @@ export default function ProjetDetailPage() {
                 const totalPayeDevis = devisTransactions
                   .filter((t) => t.statut === "paye")
                   .reduce((sum, t) => sum + t.montant, 0);
+                const devisJours = d.jours_signes ?? 0;
+                const devisHeuresSignees = devisJours * 8;
+                const devisHeuresAttribuees = heuresAttribueesParDevis[d.id] ?? 0;
+                const devisPct = devisHeuresSignees > 0 ? (devisHeuresAttribuees / devisHeuresSignees) * 100 : 0;
                 return (
                   <div key={d.id} className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -513,9 +604,15 @@ export default function ProjetDetailPage() {
                           <p className="font-medium">{d.libelle}</p>
                           <p className="text-sm text-muted-foreground">
                             {formatEuro(d.montant_total)}
+                            {devisJours > 0 && ` — ${devisJours}j (${devisHeuresSignees}h)`}
                             {d.date_signature &&
                               ` — signe le ${formatDate(d.date_signature)}`}
                           </p>
+                          {(d.date_debut || d.date_fin) && (
+                            <p className="text-xs text-muted-foreground">
+                              {d.date_debut ? formatDate(d.date_debut) : "..."} → {d.date_fin ? formatDate(d.date_fin) : "..."}
+                            </p>
+                          )}
                         </div>
                         {d.statut === "signe" ? (
                           <Badge
@@ -544,13 +641,21 @@ export default function ProjetDetailPage() {
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => setPaiementsDevis(d)}
+                        >
+                          <Link2 data-icon="inline-start" />
+                          Gerer paiements
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => {
                             setPaiementDevisId(d.id);
                             setPaiementDialogOpen(true);
                           }}
                         >
                           <Plus data-icon="inline-start" />
-                          Ajouter un paiement
+                          Nouveau paiement
                         </Button>
                         <AlertDialog>
                           <AlertDialogTrigger className="text-muted-foreground hover:text-destructive cursor-pointer p-1">
@@ -648,6 +753,28 @@ export default function ProjetDetailPage() {
                         Aucun paiement lie a ce devis.
                       </p>
                     )}
+                    {devisJours > 0 ? (
+                      <div className="ml-4 space-y-1">
+                        <div className="flex items-center gap-3">
+                          <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${progressColor(devisPct)}`}
+                              style={{ width: `${Math.min(devisPct, 100)}%` }}
+                            />
+                          </div>
+                          <span className={`text-xs font-medium ${progressTextColor(devisPct)}`}>
+                            {devisPct.toFixed(0)}%
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {devisHeuresAttribuees.toFixed(1)}h / {devisHeuresSignees}h signees
+                        </p>
+                      </div>
+                    ) : d.statut === "signe" ? (
+                      <p className="ml-4 text-xs text-amber-400">
+                        Renseigner les jours signes
+                      </p>
+                    ) : null}
                     {d !== devisList[devisList.length - 1] && <Separator />}
                   </div>
                 );
@@ -656,6 +783,62 @@ export default function ProjetDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Devis Qonto non associes */}
+      {unlinkedQontoDevis.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Link2 className="size-4" />
+              Devis Qonto disponibles
+            </CardTitle>
+            <CardDescription>
+              {unlinkedQontoDevis.length} devis Qonto non associes a un projet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Libelle</TableHead>
+                  <TableHead className="text-right">Montant</TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead className="w-40" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {unlinkedQontoDevis.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell className="font-medium">{d.libelle}</TableCell>
+                    <TableCell className="text-right">{formatEuro(d.montant_total)}</TableCell>
+                    <TableCell>
+                      {d.statut === "signe" ? (
+                        <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                          Signe
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+                          En cours
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleLinkQontoDevis(d.id)}
+                      >
+                        <Link2 data-icon="inline-start" />
+                        Lier a ce projet
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       <NouveauDevisDialog
         projetId={projet.id}
@@ -870,6 +1053,17 @@ export default function ProjetDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {paiementsDevis && (
+        <GererPaiementsDialog
+          devisId={paiementsDevis.id}
+          devisLibelle={paiementsDevis.libelle}
+          projetId={projet.id}
+          open={!!paiementsDevis}
+          onOpenChange={(open) => { if (!open) setPaiementsDevis(null); }}
+          onChanged={fetchData}
+        />
+      )}
 
       <ProjetDialog
         open={editDialogOpen}
