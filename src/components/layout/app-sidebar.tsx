@@ -36,19 +36,19 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="border-b px-6 py-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
+      <SidebarHeader className="border-b border-[rgba(255,255,255,0.06)] px-6 py-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-accent text-[#0A0A0A] text-sm font-bold">
             F
           </div>
-          <span className="font-semibold text-sm">Freelance OS</span>
+          <span className="font-heading font-semibold text-sm tracking-tight">Freelance OS</span>
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="px-2 py-3">
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-0.5">
               {navItems.map((item) => {
                 const isActive = pathname.startsWith(item.href);
                 return (
@@ -56,6 +56,11 @@ export function AppSidebar() {
                     <SidebarMenuButton
                       render={<Link href={item.href} />}
                       isActive={isActive}
+                      className={
+                        isActive
+                          ? "bg-[rgba(10,207,131,0.1)] text-brand-accent font-medium"
+                          : "text-brand-muted hover:bg-[rgba(255,255,255,0.04)] hover:text-white"
+                      }
                     >
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
@@ -68,8 +73,8 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t p-4">
-        <p className="text-xs text-muted-foreground">v0.1.0</p>
+      <SidebarFooter className="border-t border-[rgba(255,255,255,0.06)] p-4">
+        <p className="text-xs text-brand-muted">v0.1.0</p>
       </SidebarFooter>
     </Sidebar>
   );

@@ -6,14 +6,12 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   Projet,
   Devis,
-  Etiquette,
   TransactionCA,
   SessionHeureAvecProjet,
   Parametre,
   Objectif,
 } from "@/lib/types";
-import { etiquetteConfig, getEtiquette } from "@/lib/etiquettes";
-import { syncSessionToNotion } from "@/lib/sync-notion";
+import { getEtiquette } from "@/lib/etiquettes";
 import {
   Card,
   CardContent,
@@ -31,10 +29,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -44,29 +38,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogClose,
-} from "@/components/ui/dialog";
-import {
   Euro,
-  TrendingUp,
   Target,
   Landmark,
   Clock,
-  FolderKanban,
   AlertCircle,
-  Plus,
   FileText,
 } from "lucide-react";
 import { CaMensuelChart } from "./ca-mensuel-chart";
+import { RepartitionCAChart } from "./repartition-ca-chart";
+import { RepartitionHeuresChart } from "./repartition-heures-chart";
+import { EvolutionHeuresChart } from "./evolution-heures-chart";
 import { toast } from "sonner";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = ["all", "2024", "2025", "2026"] as const;
+const MOIS_NOMS = [
+  "jan", "fev", "mar", "avr", "mai", "juin",
+  "juil", "aout", "sep", "oct", "nov", "dec",
+];
 
 function formatEuro(n: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -85,14 +75,33 @@ function todayStr(): string {
   return new Date().toISOString().split("T")[0];
 }
 
+function startOfWeek(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().split("T")[0];
+}
+
+function startOfMonth(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 const MOIS_LABELS = [
   "Jan", "Fev", "Mar", "Avr", "Mai", "Juin",
   "Juil", "Aout", "Sep", "Oct", "Nov", "Dec",
 ];
 
+const PERIOD_LABELS: Record<string, string> = {
+  today: "Aujourd'hui",
+  week: "Cette semaine",
+  month: "Ce mois",
+};
+
+
 export default function DashboardPage() {
   const [projets, setProjets] = useState<Projet[]>([]);
-  const [allProjets, setAllProjets] = useState<{ id: string; nom: string }[]>([]);
   const [allTransactions, setAllTransactions] = useState<TransactionCA[]>([]);
   const [sessions, setSessions] = useState<SessionHeureAvecProjet[]>([]);
   const [parametres, setParametres] = useState<Parametre[]>([]);
@@ -102,29 +111,15 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>(String(CURRENT_YEAR));
 
-  // Sessions du jour (fetch separé pour rafraichir rapidement)
-  const [todaySessions, setTodaySessions] = useState<SessionHeureAvecProjet[]>([]);
+  // Section 1 — period filter
+  const [sessionPeriod, setSessionPeriod] = useState<string>("today");
 
-  // Modal ajout heures
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [savingSession, setSavingSession] = useState(false);
-  const [sessionForm, setSessionForm] = useState({
-    projet_id: "",
-    date: todayStr(),
-    duree: "",
-    etiquette: "design ui" as Etiquette,
-    facturable: true,
-  });
+  // Section 4 — Donut dropdowns
+  const [donutCAYear, setDonutCAYear] = useState<string>(String(CURRENT_YEAR));
+  const [donutHeuresYear, setDonutHeuresYear] = useState<string>(String(CURRENT_YEAR));
 
-  const fetchTodaySessions = useCallback(async () => {
-    const supabase = createClient();
-    const { data } = await supabase
-      .from("sessions_heures")
-      .select("*, projets(nom, type)")
-      .eq("date", todayStr())
-      .order("created_at", { ascending: false });
-    setTodaySessions((data as SessionHeureAvecProjet[]) ?? []);
-  }, []);
+  // Section 5 — Evolution granularity
+  const [evoGranularity, setEvoGranularity] = useState<string>("month");
 
   const fetchData = useCallback(async () => {
     try {
@@ -149,10 +144,9 @@ export default function DashboardPage() {
         return { data: all, error: null };
       }
 
-      const [projetsRes, projetsListRes, transactionsRes, sessionsRes, paramsRes, objectifsRes, devisRes] =
+      const [projetsRes, transactionsRes, sessionsRes, paramsRes, objectifsRes, devisRes] =
         await Promise.all([
           supabase.from("projets_with_ca").select("*"),
-          supabase.from("projets").select("id, nom").order("nom", { ascending: true }),
           supabase
             .from("transactions_ca")
             .select("*")
@@ -174,14 +168,11 @@ export default function DashboardPage() {
         projetsRes.error || transactionsRes.error || sessionsRes.error || paramsRes.error || objectifsRes.error;
       if (firstError) {
         setError("Impossible de charger les donnees du dashboard.");
-        toast.error("Erreur de chargement", {
-          description: firstError.message,
-        });
+        toast.error("Erreur de chargement", { description: firstError.message });
         return;
       }
 
       setProjets((projetsRes.data as Projet[]) ?? []);
-      setAllProjets((projetsListRes.data as { id: string; nom: string }[]) ?? []);
       setAllTransactions((transactionsRes.data as TransactionCA[]) ?? []);
       setSessions(sessionsRes.data ?? []);
       setParametres((paramsRes.data as Parametre[]) ?? []);
@@ -190,9 +181,7 @@ export default function DashboardPage() {
       setError(null);
     } catch {
       setError("Impossible de charger les donnees du dashboard.");
-      toast.error("Erreur reseau", {
-        description: "Verifiez votre connexion internet.",
-      });
+      toast.error("Erreur reseau", { description: "Verifiez votre connexion internet." });
     } finally {
       setLoading(false);
     }
@@ -200,55 +189,30 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchData();
-    fetchTodaySessions();
-  }, [fetchData, fetchTodaySessions]);
+  }, [fetchData]);
 
-  // --- Ajout session ---
-  function updateSessionForm(field: string, value: string | boolean) {
-    setSessionForm((prev) => ({ ...prev, [field]: value }));
-  }
+  // ───── Section 1: Sessions by period ─────
+  const filteredSessions = useMemo(() => {
+    let minDate: string;
+    if (sessionPeriod === "week") minDate = startOfWeek();
+    else if (sessionPeriod === "month") minDate = startOfMonth();
+    else minDate = todayStr();
 
-  async function handleAddSession(e: React.FormEvent) {
-    e.preventDefault();
-    if (!sessionForm.projet_id || !sessionForm.duree) return;
+    return sessions.filter((s) => s.date >= minDate);
+  }, [sessions, sessionPeriod]);
 
-    setSavingSession(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("sessions_heures").insert({
-      projet_id: sessionForm.projet_id,
-      date: sessionForm.date,
-      duree: parseFloat(sessionForm.duree),
-      etiquette: sessionForm.etiquette,
-      facturable: sessionForm.facturable,
-    });
-    setSavingSession(false);
-
-    if (error) {
-      toast.error("Erreur", { description: "Impossible d'ajouter la session." });
-    } else {
-      toast.success("Session ajoutee");
-      const projet = allProjets.find((p) => p.id === sessionForm.projet_id);
-      syncSessionToNotion({
-        title: `${projet?.nom ?? "Session"} — ${sessionForm.etiquette}`,
-        projet_nom: projet?.nom ?? "",
-        date: sessionForm.date,
-        duree: parseFloat(sessionForm.duree),
-        etiquette: sessionForm.etiquette,
-        facturable: sessionForm.facturable,
-      });
-      setSessionForm((prev) => ({ ...prev, duree: "", date: todayStr() }));
-      setAddDialogOpen(false);
-      fetchTodaySessions();
-    }
-  }
-
-  // --- Sessions du jour ---
-  const totalHeuresAujourdhui = useMemo(
-    () => todaySessions.reduce((sum, s) => sum + s.duree, 0),
-    [todaySessions]
+  const totalHeuresPeriod = useMemo(
+    () => filteredSessions.reduce((sum, s) => sum + s.duree, 0),
+    [filteredSessions]
   );
 
-  // --- Filter transactions by selected year ---
+  // ───── Shared: client project IDs ─────
+  const clientProjetIds = useMemo(
+    () => new Set(projets.filter((p) => p.type === "client").map((p) => p.id)),
+    [projets]
+  );
+
+  // ───── Filter transactions by selected year (for CA chart + KPI CA) ─────
   const transactions = useMemo(() => {
     if (selectedYear === "all") return allTransactions;
     const year = parseInt(selectedYear);
@@ -257,31 +221,22 @@ export default function DashboardPage() {
 
   const isCurrentYear = selectedYear === String(CURRENT_YEAR);
 
-  // --- Parametres ---
+  // ───── Section 2 KPI: Objectif annuel ─────
   const objectifAnnuel = useMemo(() => {
-    if (objectifs.length > 0) {
-      return objectifs.reduce((sum, o) => sum + o.ca_cible, 0);
-    }
+    if (objectifs.length > 0) return objectifs.reduce((sum, o) => sum + o.ca_cible, 0);
     return getParam(parametres, "objectif_ca_annuel", 60000);
   }, [objectifs, parametres]);
 
   const soldeComptePro = getParam(parametres, "solde_compte_pro", 0);
   const fraisMensuels = getParam(parametres, "frais_mensuels_fixes", 131.67);
 
-  // Taux dynamiques depuis la table parametres
   const tauxUrssafParam = parametres.find((p) => p.cle === "taux_urssaf");
   const tauxImpotsParam = parametres.find((p) => p.cle === "taux_impots");
   const hasTaux = tauxUrssafParam != null && tauxImpotsParam != null;
   const tauxUrssaf = hasTaux ? parseFloat(tauxUrssafParam.valeur) : 0;
   const tauxImpots = hasTaux ? parseFloat(tauxImpotsParam.valeur) : 0;
 
-  // --- IDs projets client ---
-  const clientProjetIds = useMemo(
-    () => new Set(projets.filter((p) => p.type === "client").map((p) => p.id)),
-    [projets]
-  );
-
-  // --- KPI: CA Encaisse (paye) ---
+  // ───── KPI: CA ─────
   const caEncaisse = useMemo(
     () =>
       transactions
@@ -290,7 +245,6 @@ export default function DashboardPage() {
     [transactions, clientProjetIds]
   );
 
-  // --- KPI: CA Devise (signe) ---
   const caDevise = useMemo(
     () =>
       transactions
@@ -299,96 +253,81 @@ export default function DashboardPage() {
     [transactions, clientProjetIds]
   );
 
-  // --- KPI: Net mensuel moyen ---
-  const { netMensuelMoyen, netMensuelLabel } = useMemo(() => {
-    if (!hasTaux) return { netMensuelMoyen: 0, netMensuelLabel: "" };
+  // ───── KPI: Net mensuel — réel + à venir ─────
+  const janFirst = `${CURRENT_YEAR}-01-01`;
+  const coefNet = 1 - tauxUrssaf - tauxImpots;
 
+  const netReel = useMemo(() => {
+    if (!hasTaux) return null;
     const now = new Date();
-    const currentMonth = now.getMonth() + 1;
-    const currentFullYear = now.getFullYear();
+    const moisEcoules = now.getMonth(); // 0-indexed = mois complets écoulés (en avril → 3)
+    if (moisEcoules === 0) return null;
 
-    if (selectedYear === "all") {
-      const caTotal = allTransactions
-        .filter(
-          (t) =>
-            t.statut === "paye" &&
-            clientProjetIds.has(t.projet_id) &&
-            t.date >= "2024-10-01"
-        )
-        .reduce((sum, t) => sum + t.montant, 0);
-      const nbMois = (currentFullYear - 2024) * 12 + (currentMonth - 1) - 9;
-      const net = nbMois > 0 ? (caTotal / nbMois) * (1 - tauxUrssaf - tauxImpots) : 0;
-      return {
-        netMensuelMoyen: net,
-        netMensuelLabel: `Moyenne depuis oct. 2024 (${Math.max(nbMois, 0)} mois)`,
-      };
-    }
-
-    const year = parseInt(selectedYear);
-    const yearTransactions = allTransactions.filter(
-      (t) =>
-        t.statut === "paye" &&
-        clientProjetIds.has(t.projet_id) &&
-        new Date(t.date).getFullYear() === year
-    );
-    const caPaye = yearTransactions.reduce((sum, t) => sum + t.montant, 0);
-
-    if (year < currentFullYear) {
-      const net = (caPaye / 12) * (1 - tauxUrssaf - tauxImpots);
-      return {
-        netMensuelMoyen: net,
-        netMensuelLabel: `Moyenne sur 12 mois (${year})`,
-      };
-    }
-
-    const moisEcoules = currentMonth - 1;
-    const net = moisEcoules > 0 ? (caPaye / moisEcoules) * (1 - tauxUrssaf - tauxImpots) : 0;
-    return {
-      netMensuelMoyen: net,
-      netMensuelLabel: `Moyenne sur ${moisEcoules} mois (annee en cours)`,
-    };
-  }, [allTransactions, clientProjetIds, hasTaux, tauxUrssaf, tauxImpots, selectedYear]);
-
-  // --- KPI: Jours signes ---
-  const joursSignes = useMemo(() => {
-    let devis = allDevis;
-    if (selectedYear !== "all") {
-      const year = parseInt(selectedYear);
-      devis = devis.filter((d) => {
-        const sigDate = d.date_signature ?? d.created_at;
-        return new Date(sigDate).getFullYear() === year;
-      });
-    }
-    return devis.reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
-  }, [allDevis, selectedYear]);
-
-  // --- KPI: Tresorerie ---
-  const salaireVersable6m = (soldeComptePro - fraisMensuels * 6) / 6;
-
-  // --- Rentabilite moyenne projets actifs ---
-  const projetsActifs = useMemo(
-    () => projets.filter((p) => p.statut === "en_cours" && p.type === "client"),
-    [projets]
-  );
-
-  const rentabiliteMoyenne = useMemo(() => {
-    if (projetsActifs.length === 0) return null;
-    const projetIds = new Set(projetsActifs.map((p) => p.id));
-
-    const heuresTotalesActifs = sessions
-      .filter((s) => projetIds.has(s.projet_id))
-      .reduce((sum, s) => sum + s.duree, 0);
-
-    const caPayeActifs = allTransactions
-      .filter((t) => projetIds.has(t.projet_id) && t.statut === "paye")
+    const caPayeAnnee = allTransactions
+      .filter((t) => {
+        if (t.statut !== "paye") return false;
+        const dp = t.date_paiement ?? t.date;
+        return dp >= janFirst && clientProjetIds.has(t.projet_id);
+      })
       .reduce((sum, t) => sum + t.montant, 0);
 
-    return heuresTotalesActifs > 0
-      ? caPayeActifs / heuresTotalesActifs
-      : null;
-  }, [projetsActifs, sessions, allTransactions]);
+    return {
+      montant: (caPayeAnnee / moisEcoules) * coefNet,
+      mois: moisEcoules,
+    };
+  }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
 
-  // --- Chart data (filtered by selected year) ---
+  const netAVenir = useMemo(() => {
+    if (!hasTaux) return null;
+
+    // Transactions non-payées (signe + en_attente) de l'année en cours
+    const txNonPayees = allTransactions.filter((t) => {
+      if (t.statut === "paye") return false;
+      const dp = t.date_paiement ?? t.date;
+      return dp >= janFirst && clientProjetIds.has(t.projet_id);
+    });
+
+    if (txNonPayees.length === 0) return null;
+
+    // Dernier mois parmi les non-payées
+    let dernierMois = 0;
+    for (const t of txNonPayees) {
+      const dp = t.date_paiement ?? t.date;
+      const m = new Date(dp).getMonth(); // 0-indexed
+      if (m > dernierMois) dernierMois = m;
+    }
+
+    // Toutes les transactions (payé + signe + en_attente) de jan → dernier mois
+    const nbMois = dernierMois + 1; // jan=0 → 1 mois, etc.
+    const caTotal = allTransactions
+      .filter((t) => {
+        const dp = t.date_paiement ?? t.date;
+        return dp >= janFirst && clientProjetIds.has(t.projet_id);
+      })
+      .reduce((sum, t) => sum + t.montant, 0);
+
+    return {
+      montant: (caTotal / nbMois) * coefNet,
+      mois: nbMois,
+      dernierMoisLabel: MOIS_NOMS[dernierMois],
+    };
+  }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
+
+  // ───── KPI: Jours signes (current year) ─────
+  const joursSignes = useMemo(() => {
+    const year = CURRENT_YEAR;
+    return allDevis
+      .filter((d) => {
+        const sigDate = d.date_signature ?? d.created_at;
+        return new Date(sigDate).getFullYear() === year;
+      })
+      .reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
+  }, [allDevis]);
+
+  // ───── KPI: Tresorerie ─────
+  const salaireVersable6m = (soldeComptePro - fraisMensuels * 6) / 6;
+
+  // ───── Section 3: Chart data ─────
   const chartData = useMemo(() => {
     const objectifMensuel = isCurrentYear ? objectifAnnuel / 12 : 0;
     const payeParMois = new Array(12).fill(0);
@@ -397,11 +336,8 @@ export default function DashboardPage() {
     for (const t of transactions) {
       if (!clientProjetIds.has(t.projet_id)) continue;
       const mois = new Date(t.date).getMonth();
-      if (t.statut === "paye") {
-        payeParMois[mois] += t.montant;
-      } else if (t.statut === "signe" || t.statut === "en_attente") {
-        attenteParMois[mois] += t.montant;
-      }
+      if (t.statut === "paye") payeParMois[mois] += t.montant;
+      else if (t.statut === "signe" || t.statut === "en_attente") attenteParMois[mois] += t.montant;
     }
 
     return MOIS_LABELS.map((label, i) => ({
@@ -412,22 +348,95 @@ export default function DashboardPage() {
     }));
   }, [transactions, objectifAnnuel, clientProjetIds, isCurrentYear]);
 
-  // --- Projets actifs stats ---
-  const projetsActifsStats = useMemo(() => {
-    return projetsActifs.map((p) => {
-      const heures = sessions
-        .filter((s) => s.projet_id === p.id)
+  // ───── Section 4a: Donut CA par projet ─────
+  const donutCAData = useMemo(() => {
+    const projetMap = new Map<string, { nom: string; montant: number }>();
+    const filteredTx =
+      donutCAYear === "all"
+        ? allTransactions
+        : allTransactions.filter((t) => new Date(t.date).getFullYear() === parseInt(donutCAYear));
+
+    for (const t of filteredTx) {
+      if (t.statut !== "paye" || !clientProjetIds.has(t.projet_id)) continue;
+      const proj = projets.find((p) => p.id === t.projet_id);
+      const nom = proj?.nom ?? "Inconnu";
+      const existing = projetMap.get(t.projet_id);
+      if (existing) existing.montant += t.montant;
+      else projetMap.set(t.projet_id, { nom, montant: t.montant });
+    }
+
+    return [...projetMap.values()];
+  }, [allTransactions, clientProjetIds, projets, donutCAYear]);
+
+  // ───── Section 4b: Donut heures par projet ─────
+  const donutHeuresData = useMemo(() => {
+    const projetMap = new Map<string, { nom: string; heures: number }>();
+    const filteredSes =
+      donutHeuresYear === "all"
+        ? sessions
+        : sessions.filter((s) => new Date(s.date).getFullYear() === parseInt(donutHeuresYear));
+
+    for (const s of filteredSes) {
+      const nom = s.projets?.nom ?? "Inconnu";
+      const existing = projetMap.get(s.projet_id);
+      if (existing) existing.heures += s.duree;
+      else projetMap.set(s.projet_id, { nom, heures: s.duree });
+    }
+
+    return [...projetMap.values()];
+  }, [sessions, donutHeuresYear]);
+
+  // ───── Section 5: Evolution heures ─────
+  const evolutionData = useMemo(() => {
+    // Start from Oct 2024
+    const startDate = new Date(2024, 9, 1); // Oct 2024
+    const now = new Date();
+
+    if (evoGranularity === "month") {
+      const points: { label: string; heures: number }[] = [];
+      const cursor = new Date(startDate);
+
+      while (cursor <= now) {
+        const y = cursor.getFullYear();
+        const m = cursor.getMonth();
+        const key = `${MOIS_LABELS[m]} ${y.toString().slice(2)}`;
+        const total = sessions
+          .filter((s) => {
+            const d = new Date(s.date);
+            return d.getFullYear() === y && d.getMonth() === m;
+          })
+          .reduce((sum, s) => sum + s.duree, 0);
+        points.push({ label: key, heures: Math.round(total * 10) / 10 });
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+      return points;
+    }
+
+    // Weekly
+    const points: { label: string; heures: number }[] = [];
+    const cursor = new Date(startDate);
+    // Align to Monday
+    const day = cursor.getDay();
+    cursor.setDate(cursor.getDate() - day + (day === 0 ? -6 : 1));
+
+    while (cursor <= now) {
+      const weekEnd = new Date(cursor);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      const startStr = cursor.toISOString().split("T")[0];
+      const endStr = weekEnd.toISOString().split("T")[0];
+
+      const total = sessions
+        .filter((s) => s.date >= startStr && s.date <= endStr)
         .reduce((sum, s) => sum + s.duree, 0);
-      const paye = allTransactions
-        .filter((t) => t.projet_id === p.id && t.statut === "paye")
-        .reduce((sum, t) => sum + t.montant, 0);
-      const rentabilite = heures > 0 ? paye / heures : null;
-      return { ...p, heures, paye, rentabilite };
-    });
-  }, [projetsActifs, sessions, allTransactions]);
 
-  const dernieresSessions = sessions.slice(0, 5);
+      const label = `${cursor.getDate()}/${cursor.getMonth() + 1}`;
+      points.push({ label, heures: Math.round(total * 10) / 10 });
+      cursor.setDate(cursor.getDate() + 7);
+    }
+    return points;
+  }, [sessions, evoGranularity]);
 
+  // ───── Loading ─────
   if (loading) {
     return (
       <div className="space-y-6">
@@ -436,10 +445,8 @@ export default function DashboardPage() {
           <Skeleton className="mt-2 h-4 w-72" />
         </div>
         <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-36" />
-            <Skeleton className="h-8 w-16" />
-          </CardHeader>
+          <CardHeader><Skeleton className="h-5 w-36" /></CardHeader>
+          <CardContent><Skeleton className="h-20 w-full" /></CardContent>
         </Card>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -448,20 +455,12 @@ export default function DashboardPage() {
                 <Skeleton className="h-4 w-24" />
                 <Skeleton className="h-6 w-20" />
               </CardHeader>
-              <CardContent>
-                <Skeleton className="h-3 w-32" />
-              </CardContent>
+              <CardContent><Skeleton className="h-3 w-32" /></CardContent>
             </Card>
           ))}
         </div>
         <Card>
-          <CardHeader>
-            <Skeleton className="h-5 w-44" />
-            <Skeleton className="h-4 w-60" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-64 w-full" />
-          </CardContent>
+          <CardContent><Skeleton className="h-64 w-full" /></CardContent>
         </Card>
       </div>
     );
@@ -487,8 +486,8 @@ export default function DashboardPage() {
       {/* Header + Year selector */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-2xl font-bold font-heading">Dashboard</h1>
+          <p className="text-[#767676]">
             Vue d&apos;ensemble de votre activite freelance.
           </p>
         </div>
@@ -506,130 +505,34 @@ export default function DashboardPage() {
         </Select>
       </div>
 
-      {/* Compteur heures du jour */}
+      {/* ══════════ Section 1 — Aujourd'hui ══════════ */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Clock className="size-4" />
-            Aujourd&apos;hui
+            {PERIOD_LABELS[sessionPeriod]}
           </CardTitle>
           <CardAction>
-            <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-              <DialogTrigger
-                render={
-                  <Button size="sm">
-                    <Plus data-icon="inline-start" />
-                    Ajouter des heures
-                  </Button>
-                }
-              />
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Ajouter une session</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleAddSession} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Projet *</Label>
-                    <Select
-                      value={sessionForm.projet_id}
-                      onValueChange={(v) => { if (v) updateSessionForm("projet_id", v); }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choisir un projet">
-                          {(value: string) => {
-                            const p = allProjets.find((pr) => pr.id === value);
-                            return p?.nom ?? "Choisir un projet";
-                          }}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allProjets.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.nom}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="modal-duree">Duree (h) *</Label>
-                      <Input
-                        id="modal-duree"
-                        type="number"
-                        min="0.25"
-                        step="0.25"
-                        placeholder="1.5"
-                        value={sessionForm.duree}
-                        onChange={(e) => updateSessionForm("duree", e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="modal-date">Date</Label>
-                      <Input
-                        id="modal-date"
-                        type="date"
-                        value={sessionForm.date}
-                        onChange={(e) => updateSessionForm("date", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Etiquette</Label>
-                    <Select
-                      value={sessionForm.etiquette}
-                      onValueChange={(v) => { if (v) updateSessionForm("etiquette", v); }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(etiquetteConfig).map(([key, cfg]) => (
-                          <SelectItem key={key} value={key}>
-                            {cfg.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      checked={sessionForm.facturable}
-                      onCheckedChange={(checked) =>
-                        updateSessionForm("facturable", checked === true)
-                      }
-                    />
-                    <Label className="cursor-pointer">Facturable</Label>
-                  </div>
-
-                  <div className="flex justify-end gap-2">
-                    <DialogClose
-                      render={<Button type="button" variant="outline">Annuler</Button>}
-                    />
-                    <Button
-                      type="submit"
-                      disabled={savingSession || !sessionForm.projet_id || !sessionForm.duree}
-                    >
-                      {savingSession ? "Enregistrement..." : "Sauvegarder"}
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+            <Select value={sessionPeriod} onValueChange={(v) => { if (v) setSessionPeriod(v); }}>
+              <SelectTrigger className="w-40" size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Aujourd&apos;hui</SelectItem>
+                <SelectItem value="week">Cette semaine</SelectItem>
+                <SelectItem value="month">Ce mois</SelectItem>
+              </SelectContent>
+            </Select>
           </CardAction>
         </CardHeader>
         <CardContent>
-          {todaySessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aucune heure loguee aujourd&apos;hui
+          {filteredSessions.length === 0 ? (
+            <p className="text-sm text-[#767676]">
+              Aucune heure loguee {sessionPeriod === "today" ? "aujourd'hui" : sessionPeriod === "week" ? "cette semaine" : "ce mois"}
             </p>
           ) : (
             <div className="space-y-3">
-              <p className="text-2xl font-bold">{totalHeuresAujourdhui}h</p>
+              <p className="text-2xl font-bold">{totalHeuresPeriod}h</p>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -639,7 +542,7 @@ export default function DashboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {todaySessions.map((s) => {
+                  {filteredSessions.slice(0, 15).map((s) => {
                     const cfg = getEtiquette(s.etiquette);
                     return (
                       <TableRow key={s.id}>
@@ -657,19 +560,24 @@ export default function DashboardPage() {
                   })}
                 </TableBody>
               </Table>
+              {filteredSessions.length > 15 && (
+                <p className="text-xs text-[#767676] text-center">
+                  +{filteredSessions.length - 15} autres sessions
+                </p>
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        {/* CA — barre a deux segments */}
-        <Card size="sm" className="sm:col-span-2">
+      {/* ══════════ Section 2 — 4 KPI Cards ══════════ */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* CA paye + barre */}
+        <Card size="sm">
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <Target className="size-3.5" />
-              Chiffre d&apos;affaires
+              CA {selectedYear === "all" ? "all time" : selectedYear}
             </CardDescription>
             <CardTitle className="text-xl">
               {formatEuro(caEncaisse + caDevise)}
@@ -678,59 +586,74 @@ export default function DashboardPage() {
           <CardContent>
             {isCurrentYear && objectifAnnuel > 0 ? (
               <div className="space-y-1.5">
-                <div className="h-3 w-full rounded-full bg-muted overflow-hidden flex">
+                <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
                   <div
-                    className="h-full bg-emerald-500 transition-all"
+                    className="h-full bg-brand-accent transition-all"
                     style={{ width: `${Math.min((caEncaisse / objectifAnnuel) * 100, 100)}%` }}
                   />
                   <div
-                    className="h-full bg-amber-500 transition-all"
+                    className="h-full bg-brand-accent/30 transition-all"
                     style={{ width: `${Math.min((caDevise / objectifAnnuel) * 100, Math.max(100 - (caEncaisse / objectifAnnuel) * 100, 0))}%` }}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  <span className="text-emerald-400">{formatEuro(caEncaisse)} encaisses</span>
+                <p className="text-xs text-[#767676]">
+                  <span className="text-brand-accent">{formatEuro(caEncaisse)}</span>
                   {" + "}
-                  <span className="text-amber-400">{formatEuro(caDevise)} signes</span>
-                  {" = "}
-                  {formatEuro(caEncaisse + caDevise)} / {formatEuro(objectifAnnuel)} objectif
+                  <span className="text-brand-accent/50">{formatEuro(caDevise)} signes</span>
+                  {" / "}
+                  {formatEuro(objectifAnnuel)}
                 </p>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                <span className="text-emerald-400">{formatEuro(caEncaisse)} encaisses</span>
+              <p className="text-xs text-[#767676]">
+                <span className="text-brand-accent">{formatEuro(caEncaisse)} payes</span>
                 {" + "}
-                <span className="text-amber-400">{formatEuro(caDevise)} signes</span>
-                {" — "}{selectedYear === "all" ? "all time" : selectedYear}
+                <span className="text-brand-accent/50">{formatEuro(caDevise)} signes</span>
               </p>
             )}
           </CardContent>
         </Card>
 
-        {/* Net mensuel moyen */}
+        {/* Net mensuel moyen — réel + à venir */}
         <Card size="sm">
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <Euro className="size-3.5" />
-              Net mensuel moyen
+              Net mensuel moyen {CURRENT_YEAR}
             </CardDescription>
-            <CardTitle className="text-xl">
-              {hasTaux ? formatEuro(netMensuelMoyen) : "—"}
-            </CardTitle>
           </CardHeader>
           <CardContent>
-            {hasTaux ? (
-              <p className="text-xs text-muted-foreground">
-                {netMensuelLabel} — apres URSSAF ({(tauxUrssaf * 100).toFixed(1)}%) + impots (
-                {(tauxImpots * 100).toFixed(0)}%)
-              </p>
-            ) : (
-              <Link
-                href="/parametres"
-                className="text-xs text-amber-400 hover:underline"
-              >
-                Configurez vos taux dans les parametres
+            {!hasTaux ? (
+              <Link href="/parametres" className="text-xs text-brand-accent/50 hover:underline">
+                Configurer les taux
               </Link>
+            ) : (
+              <div className="space-y-3">
+                {/* Net réel */}
+                <div>
+                  <p className="text-xl font-bold text-white">
+                    {netReel ? formatEuro(netReel.montant) : "—"}
+                  </p>
+                  <p className="text-xs text-[#767676] mt-0.5">
+                    Moyenne sur {netReel?.mois ?? 0} mois (paye)
+                  </p>
+                </div>
+
+                {/* Divider + Net à venir */}
+                {netAVenir && (
+                  <>
+                    <div className="h-px bg-[rgba(255,255,255,0.06)]" />
+                    <div>
+                      <p className="text-lg font-bold text-brand-accent">
+                        {formatEuro(netAVenir.montant)}
+                      </p>
+                      <p className="text-xs text-[#767676] mt-0.5">
+                        Moyenne jan → {netAVenir.dernierMoisLabel} (paye + signe)
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -740,17 +663,17 @@ export default function DashboardPage() {
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <Landmark className="size-3.5" />
-              Tresorerie
+              Tresorerie Qonto
             </CardDescription>
             <CardTitle className="text-xl">
               {formatEuro(soldeComptePro)}
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-0.5 text-xs text-muted-foreground">
+            <div className="space-y-0.5 text-xs text-[#767676]">
               <p>
                 Salaire versable /6m :{" "}
-                <span className={salaireVersable6m >= 0 ? "text-emerald-400" : "text-red-400"}>
+                <span className={salaireVersable6m >= 0 ? "text-brand-accent" : "text-red-400"}>
                   {formatEuro(salaireVersable6m)}
                 </span>
               </p>
@@ -764,21 +687,21 @@ export default function DashboardPage() {
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <FileText className="size-3.5" />
-              Jours signes
+              Jours signes {CURRENT_YEAR}
             </CardDescription>
             <CardTitle className="text-xl">
               {joursSignes}j
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              {(joursSignes * 8).toFixed(0)}h — {selectedYear === "all" ? "all time" : selectedYear}
+            <p className="text-xs text-[#767676]">
+              {(joursSignes * 8).toFixed(0)}h equivalentes
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Graphique CA mensuel */}
+      {/* ══════════ Section 3 — Graphique CA mensuel ══════════ */}
       <Card>
         <CardHeader>
           <CardTitle>
@@ -795,129 +718,77 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      {/* ══════════ Section 4 — Donuts côte à côte ══════════ */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Projets actifs */}
+        {/* Donut CA */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FolderKanban className="size-4" />
-              Projets clients actifs
-            </CardTitle>
-            {rentabiliteMoyenne !== null && (
-              <CardDescription className="flex items-center gap-1.5">
-                <TrendingUp className="size-3" />
-                Rentabilite reelle : {formatEuro(rentabiliteMoyenne)}/h
-              </CardDescription>
-            )}
+            <CardTitle>Repartition CA par projet</CardTitle>
+            <CardAction>
+              <Select value={donutCAYear} onValueChange={(v) => { if (v) setDonutCAYear(v); }}>
+                <SelectTrigger size="sm" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {YEAR_OPTIONS.map((y) => (
+                    <SelectItem key={y} value={y}>
+                      {y === "all" ? "All time" : y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardAction>
           </CardHeader>
           <CardContent>
-            {projetsActifsStats.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-center">
-                <FolderKanban className="size-8 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">
-                  Aucun projet en cours.
-                </p>
-                <Link
-                  href="/projets"
-                  className="text-sm font-medium text-primary hover:underline"
-                >
-                  Voir tous les projets
-                </Link>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Projet</TableHead>
-                    <TableHead className="text-right">Paye</TableHead>
-                    <TableHead className="text-right">Heures</TableHead>
-                    <TableHead className="text-right">EUR/h</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {projetsActifsStats.map((p) => (
-                    <TableRow key={p.id}>
-                      <TableCell>
-                        <Link
-                          href={`/projets/${p.id}`}
-                          className="font-medium hover:underline"
-                        >
-                          {p.nom}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatEuro(p.paye)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {p.heures.toFixed(1)}h
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {p.rentabilite !== null
-                          ? formatEuro(p.rentabilite) + "/h"
-                          : "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
+            <RepartitionCAChart data={donutCAData} />
           </CardContent>
         </Card>
 
-        {/* Dernieres sessions */}
+        {/* Donut heures */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="size-4" />
-              Dernieres sessions
-            </CardTitle>
+            <CardTitle>Repartition heures par projet</CardTitle>
+            <CardAction>
+              <Select value={donutHeuresYear} onValueChange={(v) => { if (v) setDonutHeuresYear(v); }}>
+                <SelectTrigger size="sm" className="w-28">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {YEAR_OPTIONS.map((y) => (
+                    <SelectItem key={y} value={y}>
+                      {y === "all" ? "All time" : y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardAction>
           </CardHeader>
           <CardContent>
-            {dernieresSessions.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-center">
-                <Clock className="size-8 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">
-                  Aucune session enregistree.
-                </p>
-                <Link
-                  href="/heures"
-                  className="text-sm font-medium text-primary hover:underline"
-                >
-                  Loguer du temps
-                </Link>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Projet</TableHead>
-                    <TableHead className="text-right">Duree</TableHead>
-                    <TableHead>Etiquette</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {dernieresSessions.map((s) => {
-                    const cfg = getEtiquette(s.etiquette);
-                    return (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-medium">
-                          {s.projets?.nom ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-right">{s.duree}h</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={cfg.className}>
-                            {cfg.label}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
+            <RepartitionHeuresChart data={donutHeuresData} />
           </CardContent>
         </Card>
       </div>
+
+      {/* ══════════ Section 5 — Courbe evolution heures ══════════ */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Evolution des heures</CardTitle>
+          <CardAction>
+            <Select value={evoGranularity} onValueChange={(v) => { if (v) setEvoGranularity(v); }}>
+              <SelectTrigger size="sm" className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="month">Par mois</SelectItem>
+                <SelectItem value="week">Par semaine</SelectItem>
+              </SelectContent>
+            </Select>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <EvolutionHeuresChart data={evolutionData} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
