@@ -45,9 +45,17 @@ function formatEuro(n: number) {
   }).format(n);
 }
 
+interface SoldeInfo {
+  solde_euros: number | null;
+  iban_trouve: string | null;
+  nb_comptes: number;
+  erreur: string | null;
+}
+
 interface SyncResult {
   transactions: { imported: number; updated: number; skipped: number; total: number };
   factures: { imported: number; updated: number; error?: string | null };
+  solde?: SoldeInfo;
 }
 
 export default function QontoPage() {
@@ -67,6 +75,7 @@ export default function QontoPage() {
   const [qontoInvoices, setQontoInvoices] = useState<TransactionCA[]>([]);
   const [showAllInvoices, setShowAllInvoices] = useState(false);
   const [soldeComptePro, setSoldeComptePro] = useState<string | null>(null);
+  const [soldeDebug, setSoldeDebug] = useState<SoldeInfo | null>(null);
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -153,6 +162,9 @@ export default function QontoPage() {
         toast.success("Synchronisation terminee", {
           description: `Transactions: ${tx.imported} importees, ${tx.updated} MAJ — Factures: ${fct.imported} importees, ${fct.updated} MAJ`,
         });
+        if (data.solde) {
+          setSoldeDebug(data.solde);
+        }
         fetchData();
       }
     } catch {
@@ -315,6 +327,18 @@ export default function QontoPage() {
                     {formatEuro(parseFloat(soldeComptePro))}
                   </p>
                 </div>
+              )}
+            </div>
+          )}
+
+          {soldeDebug && (
+            <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 text-xs text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground/70">Debug solde Qonto</p>
+              <p>Solde : {soldeDebug.solde_euros !== null ? formatEuro(soldeDebug.solde_euros) : "—"}</p>
+              <p>IBAN trouvé : {soldeDebug.iban_trouve ?? "—"}</p>
+              <p>Nb comptes retournés : {soldeDebug.nb_comptes}</p>
+              {soldeDebug.erreur && (
+                <p className="text-red-400">Erreur : {soldeDebug.erreur}</p>
               )}
             </div>
           )}

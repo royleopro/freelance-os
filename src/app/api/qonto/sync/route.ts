@@ -55,24 +55,48 @@ export async function POST() {
     }
 
     // ========== 0. SOLDE COMPTE ==========
+    let soldeInfo: {
+      solde_euros: number | null;
+      iban_trouve: string | null;
+      nb_comptes: number;
+      erreur: string | null;
+    } = { solde_euros: null, iban_trouve: null, nb_comptes: 0, erreur: null };
+
     try {
       const accountsData = await qontoFetch(
-        "https://thirdparty.qonto.com/v2/accounts",
+        `https://thirdparty.qonto.com/v2/organizations/${encodeURIComponent(login)}`,
         login,
         secretKey
       );
-      const accounts: { balance_cents: number; currency: string; iban: string }[] =
-        accountsData.accounts ?? [];
-      const matchingAccount = accounts.find((a) => a.iban === iban);
+      console.log("[qonto/sync] Réponse complète /v2/organizations:", JSON.stringify(accountsData, null, 2));
+
+      const bankAccounts: { authorized_balance_cents: number; balance_cents: number; currency: string; iban: string }[] =
+        accountsData.organization?.bank_accounts ?? [];
+      soldeInfo.nb_comptes = bankAccounts.length;
+
+      const matchingAccount = bankAccounts.find((a) => a.iban === iban) ?? bankAccounts[0] ?? null;
+
       if (matchingAccount) {
-        const solde = matchingAccount.balance_cents / 100;
+        const solde = matchingAccount.authorized_balance_cents / 100;
+        soldeInfo.solde_euros = solde;
+        soldeInfo.iban_trouve = matchingAccount.iban;
+
         await supabase.from("parametres").upsert({
           cle: "solde_compte_pro",
           valeur: String(solde),
           updated_at: new Date().toISOString(),
         });
+        await supabase.from("parametres").upsert({
+          cle: "solde_updated_at",
+          valeur: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } else {
+        soldeInfo.erreur = "Aucun compte bancaire trouvé dans la réponse Qonto";
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      soldeInfo.erreur = errMsg;
       console.error("[qonto/sync] Account balance fetch error:", err);
     }
 
@@ -229,7 +253,7 @@ export async function POST() {
       updated_at: new Date().toISOString(),
     });
 
-    return Response.json({ success: true, ...result });
+    return Response.json({ success: true, ...result, solde: soldeInfo });
   } catch (err) {
     console.error("Qonto sync error:", err);
     return Response.json(

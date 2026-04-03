@@ -103,6 +103,26 @@ export interface Parametre {
   updated_at: string;
 }
 
+export interface Abonnement {
+  id: string;
+  nom: string;
+  montant: number;
+  periodicite: "mensuel" | "annuel";
+  categorie: string | null;
+  actif: boolean;
+  date_debut: string | null;
+  created_at: string;
+}
+
+export interface Provision {
+  id: string;
+  libelle: string;
+  montant: number;
+  date_prevue: string | null;
+  type: "prelevement" | "depense" | "autre";
+  created_at: string;
+}
+
 export interface Objectif {
   id: string;
   annee: number;

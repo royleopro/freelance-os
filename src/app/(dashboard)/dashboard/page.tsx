@@ -10,6 +10,7 @@ import type {
   SessionHeureAvecProjet,
   Parametre,
   Objectif,
+  Provision,
 } from "@/lib/types";
 import { getEtiquette } from "@/lib/etiquettes";
 import {
@@ -108,6 +109,7 @@ export default function DashboardPage() {
   const [parametres, setParametres] = useState<Parametre[]>([]);
   const [objectifs, setObjectifs] = useState<Objectif[]>([]);
   const [allDevis, setAllDevis] = useState<Devis[]>([]);
+  const [provisions, setProvisions] = useState<Provision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>(String(CURRENT_YEAR));
@@ -145,7 +147,7 @@ export default function DashboardPage() {
         return { data: all, error: null };
       }
 
-      const [projetsRes, transactionsRes, sessionsRes, paramsRes, objectifsRes, devisRes] =
+      const [projetsRes, transactionsRes, sessionsRes, paramsRes, objectifsRes, devisRes, provisionsRes] =
         await Promise.all([
           supabase.from("projets_with_ca").select("*"),
           supabase
@@ -163,6 +165,7 @@ export default function DashboardPage() {
             .from("devis")
             .select("*")
             .eq("statut", "signe"),
+          supabase.from("provisions").select("*"),
         ]);
 
       const firstError =
@@ -179,6 +182,7 @@ export default function DashboardPage() {
       setParametres((paramsRes.data as Parametre[]) ?? []);
       setObjectifs((objectifsRes.data as Objectif[]) ?? []);
       setAllDevis((devisRes.data as Devis[]) ?? []);
+      setProvisions((provisionsRes.data as Provision[]) ?? []);
       setError(null);
     } catch {
       setError("Impossible de charger les donnees du dashboard.");
@@ -327,7 +331,16 @@ export default function DashboardPage() {
   }, [allDevis]);
 
   // ───── KPI: Tresorerie ─────
-  const salaireVersable6m = (soldeComptePro - fraisMensuels * 6) / 6;
+  const todayDate = new Date().toISOString().split("T")[0];
+  const totalProvisions = useMemo(
+    () =>
+      provisions
+        .filter((p) => !p.date_prevue || p.date_prevue >= todayDate)
+        .reduce((sum, p) => sum + p.montant, 0),
+    [provisions, todayDate]
+  );
+  const soldeDisponible = soldeComptePro - totalProvisions;
+  const salaireVersable6m = (soldeDisponible - fraisMensuels * 6) / 6;
 
   // ───── Section 3: Chart data ─────
   const chartData = useMemo(() => {
@@ -679,6 +692,15 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-0.5 text-xs text-[#767676]">
+              {totalProvisions > 0 && (
+                <p>
+                  Provisions : <span className="text-red-400">-{formatEuro(totalProvisions)}</span>
+                </p>
+              )}
+              <p>
+                Solde disponible :{" "}
+                <span style={{ color: "#0ACF83" }}>{formatEuro(soldeDisponible)}</span>
+              </p>
               <p>
                 Salaire versable /6m :{" "}
                 <span className={salaireVersable6m >= 0 ? "text-brand-accent" : "text-red-400"}>

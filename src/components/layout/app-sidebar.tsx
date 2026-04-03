@@ -8,6 +8,7 @@ import {
   FileText,
   Clock,
   Target,
+  Landmark,
   Settings,
 } from "lucide-react";
 import {
@@ -28,6 +29,7 @@ const navItems = [
   { title: "Devis", href: "/devis", icon: FileText },
   { title: "Heures", href: "/heures", icon: Clock },
   { title: "Objectifs", href: "/objectifs", icon: Target },
+  { title: "Tresorerie", href: "/abonnements", icon: Landmark },
   { title: "Paramètres", href: "/parametres", icon: Settings },
 ];
 
