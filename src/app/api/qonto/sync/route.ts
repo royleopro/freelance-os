@@ -54,6 +54,28 @@ export async function POST() {
       );
     }
 
+    // ========== 0. SOLDE COMPTE ==========
+    try {
+      const accountsData = await qontoFetch(
+        "https://thirdparty.qonto.com/v2/accounts",
+        login,
+        secretKey
+      );
+      const accounts: { balance_cents: number; currency: string; iban: string }[] =
+        accountsData.accounts ?? [];
+      const matchingAccount = accounts.find((a) => a.iban === iban);
+      if (matchingAccount) {
+        const solde = matchingAccount.balance_cents / 100;
+        await supabase.from("parametres").upsert({
+          cle: "solde_compte_pro",
+          valeur: String(solde),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error("[qonto/sync] Account balance fetch error:", err);
+    }
+
     // ========== 1. TRANSACTIONS ==========
     const allTransactions: QontoTransaction[] = [];
     let currentPage = 1;

@@ -230,6 +230,7 @@ export default function DashboardPage() {
 
   const soldeComptePro = getParam(parametres, "solde_compte_pro", 0);
   const fraisMensuels = getParam(parametres, "frais_mensuels_fixes", 131.67);
+  const soldeUpdatedAt = parametres.find((p) => p.cle === "solde_compte_pro")?.updated_at ?? null;
 
   const tauxUrssafParam = parametres.find((p) => p.cle === "taux_urssaf");
   const tauxImpotsParam = parametres.find((p) => p.cle === "taux_impots");
@@ -685,6 +686,14 @@ export default function DashboardPage() {
                 </span>
               </p>
               <p>Frais mensuels : {formatEuro(fraisMensuels)}</p>
+              {soldeUpdatedAt && (
+                <p className="mt-1">
+                  MAJ : {new Date(soldeUpdatedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                </p>
+              )}
+              <p className="mt-0.5" style={{ fontSize: "11px", color: "#767676" }}>
+                Synchronise via Qonto
+              </p>
             </div>
           </CardContent>
         </Card>

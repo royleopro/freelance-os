@@ -66,6 +66,7 @@ export default function QontoPage() {
   const [recentTx, setRecentTx] = useState<TransactionCA[]>([]);
   const [qontoInvoices, setQontoInvoices] = useState<TransactionCA[]>([]);
   const [showAllInvoices, setShowAllInvoices] = useState(false);
+  const [soldeComptePro, setSoldeComptePro] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -102,6 +103,9 @@ export default function QontoPage() {
         setLastSyncResult(null);
       }
     }
+
+    const soldeVal = getParam(params, "solde_compte_pro");
+    setSoldeComptePro(soldeVal || null);
 
     setRecentTx((txRes.data as TransactionCA[]) ?? []);
     setQontoInvoices((invoicesRes.data as TransactionCA[]) ?? []);
@@ -287,7 +291,7 @@ export default function QontoPage() {
           </Button>
 
           {lastSyncResult && lastSyncResult.transactions && (
-            <div className="grid gap-3 sm:grid-cols-2 text-sm">
+            <div className="grid gap-3 sm:grid-cols-3 text-sm">
               <div className="rounded-lg border p-3 space-y-1">
                 <p className="font-medium">Transactions</p>
                 <p className="text-muted-foreground">
@@ -304,6 +308,14 @@ export default function QontoPage() {
                   </p>
                 )}
               </div>
+              {soldeComptePro && (
+                <div className="rounded-lg border p-3 space-y-1">
+                  <p className="font-medium">Solde compte pro</p>
+                  <p className="text-muted-foreground">
+                    {formatEuro(parseFloat(soldeComptePro))}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
