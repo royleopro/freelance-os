@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -10,6 +11,7 @@ import {
   Target,
   Landmark,
   Settings,
+  LogOut,
 } from "lucide-react";
 import {
   Sidebar,
@@ -35,6 +37,14 @@ const navItems = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
 
   return (
     <Sidebar>
@@ -76,7 +86,14 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-[rgba(255,255,255,0.06)] p-4">
-        <p className="text-xs text-brand-muted">v0.1.0</p>
+        <button
+          onClick={handleSignOut}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-brand-muted transition hover:bg-[rgba(255,255,255,0.04)] hover:text-white"
+        >
+          <LogOut className="h-4 w-4" />
+          <span>Se déconnecter</span>
+        </button>
+        <p className="text-xs text-brand-muted mt-2">v0.1.0</p>
       </SidebarFooter>
     </Sidebar>
   );
