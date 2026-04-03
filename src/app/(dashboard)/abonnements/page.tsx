@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Abonnement, Provision } from "@/lib/types";
+import type { Abonnement, Provision, TransactionCA, Parametre } from "@/lib/types";
 import {
   Card,
   CardContent,
@@ -30,8 +30,20 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CreditCard, Plus, Trash2, AlertTriangle } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { CreditCard, Plus, Trash2, AlertTriangle, TrendingUp } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ReferenceLine,
+} from "recharts";
 import { toast } from "sonner";
 
 const CATEGORIES = [
@@ -80,6 +92,83 @@ function DonutTooltip({
   );
 }
 
+interface ProjectionPoint {
+  label: string;
+  soldeDebut: number;
+  caAttendu: number;
+  frais: number;
+  provisionsMonth: number;
+  urssaf: number;
+  salaire: number;
+  soldeFin: number;
+}
+
+function ProjectionTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { payload: ProjectionPoint }[];
+}) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#1A1A1A] px-3 py-2.5 text-sm shadow-md min-w-[180px]">
+      <p className="font-medium text-white mb-1.5">{d.label}</p>
+      <div className="space-y-0.5 text-xs">
+        <div className="flex justify-between gap-4">
+          <span className="text-[#767676]">Solde debut</span>
+          <span className="text-white">{formatEuroCompact(d.soldeDebut)}</span>
+        </div>
+        {d.caAttendu > 0 && (
+          <div className="flex justify-between gap-4">
+            <span className="text-[#767676]">CA attendu</span>
+            <span className="text-[#0ACF83]">+{formatEuroCompact(d.caAttendu)}</span>
+          </div>
+        )}
+        {d.frais > 0 && (
+          <div className="flex justify-between gap-4">
+            <span className="text-[#767676]">Frais mensuels</span>
+            <span className="text-[#EF4444]">-{formatEuroCompact(d.frais)}</span>
+          </div>
+        )}
+        {d.provisionsMonth > 0 && (
+          <div className="flex justify-between gap-4">
+            <span className="text-[#767676]">Provisions</span>
+            <span className="text-orange-400">-{formatEuroCompact(d.provisionsMonth)}</span>
+          </div>
+        )}
+        {d.urssaf > 0 && (
+          <div className="flex justify-between gap-4">
+            <span className="text-[#767676]">URSSAF</span>
+            <span className="text-[#EF4444]">-{formatEuroCompact(d.urssaf)}</span>
+          </div>
+        )}
+        {d.salaire > 0 && (
+          <div className="flex justify-between gap-4">
+            <span className="text-[#767676]">Salaire simule</span>
+            <span className="text-[#EF4444]">-{formatEuroCompact(d.salaire)}</span>
+          </div>
+        )}
+        <div className="border-t border-[rgba(255,255,255,0.06)] mt-1.5 pt-1.5 flex justify-between gap-4">
+          <span className="text-[#767676] font-medium">Solde fin</span>
+          <span className={`font-bold ${d.soldeFin >= 0 ? "text-[#0ACF83]" : "text-[#EF4444]"}`}>
+            {formatEuroCompact(d.soldeFin)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatEuroCompact(n: number) {
+  return new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
 function formatEuro(n: number) {
   return new Intl.NumberFormat("fr-FR", {
     style: "currency",
@@ -97,6 +186,10 @@ export default function AbonnementsPage() {
   const [loading, setLoading] = useState(true);
   const [abonnements, setAbonnements] = useState<Abonnement[]>([]);
   const [provisions, setProvisions] = useState<Provision[]>([]);
+  const [transactions, setTransactions] = useState<TransactionCA[]>([]);
+  const [parametres, setParametres] = useState<Parametre[]>([]);
+  const [salaireMensuel, setSalaireMensuel] = useState<string>("");
+  const [inclureCA, setInclureCA] = useState(true);
 
   const supabase = createClient();
 
@@ -115,7 +208,7 @@ export default function AbonnementsPage() {
   );
 
   const fetchData = useCallback(async () => {
-    const [aboRes, provRes] = await Promise.all([
+    const [aboRes, provRes, txRes, paramRes] = await Promise.all([
       supabase
         .from("abonnements")
         .select("*")
@@ -124,9 +217,15 @@ export default function AbonnementsPage() {
         .from("provisions")
         .select("*")
         .order("date_prevue", { ascending: true }),
+      supabase
+        .from("transactions_ca")
+        .select("*"),
+      supabase.from("parametres").select("*"),
     ]);
     setAbonnements((aboRes.data as Abonnement[]) ?? []);
     setProvisions((provRes.data as Provision[]) ?? []);
+    setTransactions((txRes.data as TransactionCA[]) ?? []);
+    setParametres((paramRes.data as Parametre[]) ?? []);
     setLoading(false);
   }, [supabase]);
 
@@ -246,6 +345,102 @@ export default function AbonnementsPage() {
   )
     .sort((a, b) => b[1] - a[1])
     .map(([name, value]) => ({ name, value, percent: totalMensuel > 0 ? value / totalMensuel : 0 }));
+
+  // ═══════ Projection de trésorerie ═══════
+
+  const getParam = useCallback(
+    (cle: string): string => {
+      const p = parametres.find((p) => p.cle === cle);
+      return p?.valeur ?? "0";
+    },
+    [parametres]
+  );
+
+  const MOIS_LABELS = ["Jan", "Fev", "Mar", "Avr", "Mai", "Jun", "Jul", "Aou", "Sep", "Oct", "Nov", "Dec"];
+
+  const projectionData = useMemo(() => {
+    const soldeDepart = parseFloat(getParam("solde_compte_pro")) || 0;
+    const fraisMensuels = parseFloat(getParam("frais_mensuels_fixes")) || 0;
+    const tauxUrssaf = parseFloat(getParam("taux_urssaf")) || 0.256;
+    const salaire = parseFloat(salaireMensuel) || 0;
+
+    const now = new Date();
+    const months: {
+      label: string;
+      soldeDebut: number;
+      caAttendu: number;
+      frais: number;
+      provisionsMonth: number;
+      urssaf: number;
+      salaire: number;
+      soldeFin: number;
+    }[] = [];
+
+    let soldeCourant = soldeDepart;
+
+    for (let i = 0; i < 12; i++) {
+      const moisDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const moisNum = moisDate.getMonth();
+      const annee = moisDate.getFullYear();
+      const label = MOIS_LABELS[moisNum];
+
+      const soldeDebut = soldeCourant;
+
+      // CA attendu : transactions avec date_paiement (ou date en fallback) dans ce mois
+      // Si toggle actif : inclut signé + en_attente + payé. Sinon : uniquement payé.
+      const statutsInclus = inclureCA
+        ? ["signe", "en_attente", "paye"]
+        : ["paye"];
+      const caAttendu = transactions
+        .filter((tx) => {
+          if (!statutsInclus.includes(tx.statut)) return false;
+          const dp = tx.date_paiement ?? tx.date;
+          if (!dp) return false;
+          const d = new Date(dp);
+          return d.getMonth() === moisNum && d.getFullYear() === annee;
+        })
+        .reduce((sum, tx) => sum + tx.montant, 0);
+
+      // Provisions du mois
+      const provisionsMonth = provisions
+        .filter((p) => {
+          if (!p.date_prevue) return false;
+          const d = new Date(p.date_prevue);
+          return d.getMonth() === moisNum && d.getFullYear() === annee;
+        })
+        .reduce((sum, p) => sum + p.montant, 0);
+
+      // URSSAF = CA du mois × taux
+      const urssaf = caAttendu * tauxUrssaf;
+
+      const soldeFin = soldeDebut + caAttendu - fraisMensuels - provisionsMonth - urssaf - salaire;
+
+      months.push({
+        label,
+        soldeDebut,
+        caAttendu,
+        frais: fraisMensuels,
+        provisionsMonth,
+        urssaf,
+        salaire,
+        soldeFin,
+      });
+
+      soldeCourant = soldeFin;
+    }
+
+    return months;
+  }, [transactions, provisions, parametres, salaireMensuel, inclureCA, getParam]);
+
+  // Calcul du point de split pour le gradient (% de la hauteur où se trouve y=0)
+  const gradientOffset = useMemo(() => {
+    const values = projectionData.map((d) => d.soldeFin);
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    if (max <= 0) return 0;
+    if (min >= 0) return 1;
+    return max / (max - min);
+  }, [projectionData]);
 
   if (loading) {
     return (
@@ -567,6 +762,131 @@ export default function AbonnementsPage() {
             <Plus data-icon="inline-start" />
             Ajouter une provision
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Projection de trésorerie */}
+      <Card className="bg-[#0F0F0F] border-[rgba(255,255,255,0.06)]">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="size-4" />
+                Projection de tresorerie
+              </CardTitle>
+              <CardDescription>
+                Evolution estimee sur 12 mois
+              </CardDescription>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-end gap-6">
+            <div>
+              <label className="text-xs text-[#767676] block mb-1.5">
+                Salaire mensuel simule
+              </label>
+              <div className="relative w-48">
+                <Input
+                  type="number"
+                  step="100"
+                  min="0"
+                  placeholder="0"
+                  value={salaireMensuel}
+                  onChange={(e) => setSalaireMensuel(e.target.value)}
+                  className="h-9 pr-8 bg-[#0A0A0A] border-[rgba(255,255,255,0.06)] focus:border-[#0ACF83]"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#767676]">
+                  €
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pb-0.5">
+              <Switch
+                checked={inclureCA}
+                onCheckedChange={(v: boolean) => setInclureCA(v)}
+              />
+              <label className="text-xs text-[#767676]">
+                Inclure CA signe / en attente
+              </label>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={320}>
+            <AreaChart data={projectionData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
+              <defs>
+                <linearGradient id="projFillGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0ACF83" stopOpacity={0.2} />
+                  <stop offset={`${gradientOffset * 100}%`} stopColor="#0ACF83" stopOpacity={0.02} />
+                  <stop offset={`${gradientOffset * 100}%`} stopColor="#EF4444" stopOpacity={0.02} />
+                  <stop offset="100%" stopColor="#EF4444" stopOpacity={0.2} />
+                </linearGradient>
+                <linearGradient id="projStrokeGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={`${gradientOffset * 100}%`} stopColor="#0ACF83" />
+                  <stop offset={`${gradientOffset * 100}%`} stopColor="#EF4444" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="rgba(255,255,255,0.06)"
+                vertical={false}
+              />
+              <XAxis
+                dataKey="label"
+                tick={{ fill: "#767676", fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fill: "#767676", fontSize: 12 }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v: number) => {
+                  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(0)}k`;
+                  return `${v}`;
+                }}
+              />
+              <ReferenceLine y={0} stroke="#EF4444" strokeDasharray="6 4" strokeOpacity={0.4} />
+              <Tooltip content={<ProjectionTooltip />} cursor={{ stroke: "rgba(255,255,255,0.1)" }} />
+              <Area
+                type="monotone"
+                dataKey="soldeFin"
+                stroke="url(#projStrokeGradient)"
+                strokeWidth={2}
+                fill="url(#projFillGradient)"
+                dot={(props) => {
+                  const { cx, cy, payload, index } = props as { cx?: number; cy?: number; payload?: { soldeFin: number }; index?: number };
+                  if (cx == null || cy == null) return <></>;
+                  const color = (payload?.soldeFin ?? 0) >= 0 ? "#0ACF83" : "#EF4444";
+                  return (
+                    <circle
+                      key={index}
+                      cx={cx}
+                      cy={cy}
+                      r={4}
+                      fill={color}
+                      stroke="#0A0A0A"
+                      strokeWidth={2}
+                    />
+                  );
+                }}
+                activeDot={(props) => {
+                  const { cx, cy, payload } = props as { cx?: number; cy?: number; payload?: { soldeFin: number } };
+                  if (cx == null || cy == null) return <></>;
+                  const color = (payload?.soldeFin ?? 0) >= 0 ? "#0ACF83" : "#EF4444";
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={5}
+                      fill={color}
+                      stroke="#0A0A0A"
+                      strokeWidth={2}
+                    />
+                  );
+                }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
         </CardContent>
       </Card>
     </div>
