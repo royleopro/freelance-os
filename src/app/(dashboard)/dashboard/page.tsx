@@ -49,6 +49,7 @@ import { CaMensuelChart } from "./ca-mensuel-chart";
 import { RepartitionCAChart } from "./repartition-ca-chart";
 import { RepartitionHeuresChart } from "./repartition-heures-chart";
 import { EvolutionHeuresChart } from "./evolution-heures-chart";
+import { SemaineChart } from "./semaine-chart";
 import { toast } from "sonner";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -505,70 +506,76 @@ export default function DashboardPage() {
         </Select>
       </div>
 
-      {/* ══════════ Section 1 — Aujourd'hui ══════════ */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="size-4" />
-            {PERIOD_LABELS[sessionPeriod]}
-          </CardTitle>
-          <CardAction>
-            <Select value={sessionPeriod} onValueChange={(v) => { if (v) setSessionPeriod(v); }}>
-              <SelectTrigger className="w-40" size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="today">Aujourd&apos;hui</SelectItem>
-                <SelectItem value="week">Cette semaine</SelectItem>
-                <SelectItem value="month">Ce mois</SelectItem>
-              </SelectContent>
-            </Select>
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          {filteredSessions.length === 0 ? (
-            <p className="text-sm text-[#767676]">
-              Aucune heure loguee {sessionPeriod === "today" ? "aujourd'hui" : sessionPeriod === "week" ? "cette semaine" : "ce mois"}
-            </p>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-2xl font-bold">{totalHeuresPeriod}h</p>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Projet</TableHead>
-                    <TableHead className="text-right">Duree</TableHead>
-                    <TableHead>Etiquette</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredSessions.slice(0, 15).map((s) => {
-                    const cfg = getEtiquette(s.etiquette);
-                    return (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-medium">
-                          {s.projets?.nom ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-right">{s.duree}h</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={cfg.className}>
-                            {cfg.label}
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-              {filteredSessions.length > 15 && (
-                <p className="text-xs text-[#767676] text-center">
-                  +{filteredSessions.length - 15} autres sessions
-                </p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* ══════════ Section 1 — Aujourd'hui + Semaine ══════════ */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Aujourd'hui — sessions list */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="size-4" />
+              {PERIOD_LABELS[sessionPeriod]}
+            </CardTitle>
+            <CardAction>
+              <Select value={sessionPeriod} onValueChange={(v) => { if (v) setSessionPeriod(v); }}>
+                <SelectTrigger className="w-40" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="today">Aujourd&apos;hui</SelectItem>
+                  <SelectItem value="week">Cette semaine</SelectItem>
+                  <SelectItem value="month">Ce mois</SelectItem>
+                </SelectContent>
+              </Select>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {filteredSessions.length === 0 ? (
+              <p className="text-sm text-[#767676]">
+                Aucune heure loguee {sessionPeriod === "today" ? "aujourd'hui" : sessionPeriod === "week" ? "cette semaine" : "ce mois"}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-2xl font-bold">{totalHeuresPeriod}h</p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Projet</TableHead>
+                      <TableHead className="text-right">Duree</TableHead>
+                      <TableHead>Etiquette</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredSessions.slice(0, 15).map((s) => {
+                      const cfg = getEtiquette(s.etiquette);
+                      return (
+                        <TableRow key={s.id}>
+                          <TableCell className="font-medium">
+                            {s.projets?.nom ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-right">{s.duree}h</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={cfg.className}>
+                              {cfg.label}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+                {filteredSessions.length > 15 && (
+                  <p className="text-xs text-[#767676] text-center">
+                    +{filteredSessions.length - 15} autres sessions
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Semaine en cours — stacked bar chart */}
+        <SemaineChart />
+      </div>
 
       {/* ══════════ Section 2 — 4 KPI Cards ══════════ */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
