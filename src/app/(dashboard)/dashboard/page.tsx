@@ -45,7 +45,13 @@ import {
   Clock,
   AlertCircle,
   FileText,
+  Info,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CaMensuelChart } from "./ca-mensuel-chart";
 import { RepartitionCAChart } from "./repartition-ca-chart";
 import { RepartitionHeuresChart } from "./repartition-heures-chart";
@@ -159,7 +165,7 @@ export default function DashboardPage() {
           supabase
             .from("objectifs")
             .select("*")
-            .eq("annee", CURRENT_YEAR)
+            .order("annee", { ascending: true })
             .order("mois", { ascending: true }),
           supabase
             .from("devis")
@@ -211,6 +217,47 @@ export default function DashboardPage() {
     [filteredSessions]
   );
 
+  // TJM par projet = montant_total / jours_signes du dernier devis signé
+  const tjmParProjet = useMemo(() => {
+    const map = new Map<string, number>();
+    // allDevis trié par date_signature desc — on prend le premier signé par projet
+    const sorted = [...allDevis]
+      .filter((d) => d.statut === "signe" && d.jours_signes > 0)
+      .sort((a, b) => {
+        const da = a.date_signature ?? a.created_at;
+        const db = b.date_signature ?? b.created_at;
+        return db.localeCompare(da);
+      });
+    for (const d of sorted) {
+      if (d.projet_id && !map.has(d.projet_id)) {
+        map.set(d.projet_id, d.montant_total / d.jours_signes);
+      }
+    }
+    return map;
+  }, [allDevis]);
+
+  const valeurTempsBreakdown = useMemo(() => {
+    const byProjet = new Map<string, { nom: string; valeur: number }>();
+    for (const s of filteredSessions) {
+      if (!s.facturable) continue;
+      const tjm = tjmParProjet.get(s.projet_id) || 0;
+      if (tjm <= 0) continue;
+      const val = s.duree * (tjm / 8);
+      const existing = byProjet.get(s.projet_id);
+      if (existing) existing.valeur += val;
+      else
+        byProjet.set(s.projet_id, {
+          nom: s.projets?.nom ?? "Inconnu",
+          valeur: val,
+        });
+    }
+    const list = [...byProjet.values()].sort((a, b) => b.valeur - a.valeur);
+    const total = list.reduce((sum, p) => sum + p.valeur, 0);
+    return { list, total };
+  }, [filteredSessions, tjmParProjet]);
+
+  const valeurTempsFacturable = valeurTempsBreakdown.total;
+
   // ───── Shared: client project IDs ─────
   const clientProjetIds = useMemo(
     () => new Set(projets.filter((p) => p.type === "client").map((p) => p.id)),
@@ -226,11 +273,15 @@ export default function DashboardPage() {
 
   const isCurrentYear = selectedYear === String(CURRENT_YEAR);
 
-  // ───── Section 2 KPI: Objectif annuel ─────
+  // ───── Section 2 KPI: Objectif annuel pour l'année sélectionnée ─────
   const objectifAnnuel = useMemo(() => {
-    if (objectifs.length > 0) return objectifs.reduce((sum, o) => sum + o.ca_cible, 0);
-    return getParam(parametres, "objectif_ca_annuel", 60000);
-  }, [objectifs, parametres]);
+    if (selectedYear === "all") return 0;
+    const year = parseInt(selectedYear);
+    // Somme des objectifs mensuels (mois != 0) pour l'année sélectionnée
+    return objectifs
+      .filter((o) => o.annee === year && o.mois !== 0)
+      .reduce((sum, o) => sum + o.ca_cible, 0);
+  }, [objectifs, selectedYear]);
 
   const soldeComptePro = getParam(parametres, "solde_compte_pro", 0);
   const fraisMensuels = getParam(parametres, "frais_mensuels_fixes", 131.67);
@@ -344,7 +395,7 @@ export default function DashboardPage() {
 
   // ───── Section 3: Chart data ─────
   const chartData = useMemo(() => {
-    const objectifMensuel = isCurrentYear ? objectifAnnuel / 12 : 0;
+    const objectifMensuel = selectedYear !== "all" && objectifAnnuel > 0 ? objectifAnnuel / 12 : 0;
     const payeParMois = new Array(12).fill(0);
     const attenteParMois = new Array(12).fill(0);
 
@@ -360,8 +411,9 @@ export default function DashboardPage() {
       objectif: Math.round(objectifMensuel),
       paye: Math.round(payeParMois[i]),
       en_attente: Math.round(attenteParMois[i]),
+      urssaf: hasTaux ? Math.round(payeParMois[i] * tauxUrssaf) : 0,
     }));
-  }, [transactions, objectifAnnuel, clientProjetIds, isCurrentYear]);
+  }, [transactions, objectifAnnuel, clientProjetIds, selectedYear, hasTaux, tauxUrssaf]);
 
   // ───── Section 4a: Donut CA par projet ─────
   const donutCAData = useMemo(() => {
@@ -550,6 +602,46 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 <p className="text-2xl font-bold">{totalHeuresPeriod}h</p>
+                {valeurTempsFacturable > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-sm" style={{ color: "#0ACF83" }}>
+                      Valeur temps facturable : {formatEuro(Math.round(valeurTempsFacturable))}
+                    </p>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button className="text-[#767676] hover:text-[#0ACF83] transition">
+                            <Info className="size-3.5" />
+                          </button>
+                        }
+                      />
+                      <TooltipContent
+                        side="right"
+                        className="max-w-xs !bg-[#1A1A1A] !text-white border border-[#2A2A2A] !px-3 !py-2"
+                      >
+                        <div className="space-y-1 min-w-[180px]">
+                          <p className="text-[11px] font-medium text-[#767676] mb-1.5">
+                            Détail par projet
+                          </p>
+                          {valeurTempsBreakdown.list.map((p) => (
+                            <div
+                              key={p.nom}
+                              className="flex items-center justify-between gap-3 text-xs"
+                            >
+                              <span className="text-white">{p.nom}</span>
+                              <span
+                                className="font-medium"
+                                style={{ color: "#0ACF83" }}
+                              >
+                                {formatEuro(Math.round(p.valeur))}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                )}
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -605,31 +697,111 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {isCurrentYear && objectifAnnuel > 0 ? (
+            {selectedYear !== "all" && objectifAnnuel > 0 ? (
+              (() => {
+                const totalCA = caEncaisse + caDevise;
+                const estDepasse = totalCA > objectifAnnuel;
+                if (estDepasse) {
+                  const depassement = totalCA - objectifAnnuel;
+                  const pctReel = (depassement / objectifAnnuel) * 100;
+                  const greenPct = (objectifAnnuel / totalCA) * 100;
+                  const amberPct = 100 - greenPct;
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="relative h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
+                        {/* Segment vert — objectif atteint */}
+                        <div
+                          className="h-full bg-[#0ACF83]"
+                          style={{ width: `${greenPct}%` }}
+                        />
+                        {/* Segment amber — dépassement */}
+                        <div
+                          className="h-full bg-[#EF9F27]"
+                          style={{ width: `${amberPct}%` }}
+                        />
+                        {/* Encoche blanche à la limite de l'objectif */}
+                        <div
+                          className="absolute bg-white"
+                          style={{
+                            left: `${greenPct}%`,
+                            top: "50%",
+                            width: "2px",
+                            height: "16px",
+                            opacity: 0.5,
+                            transform: "translate(-50%, -50%)",
+                            borderRadius: "1px",
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-[#767676]">
+                        <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                        {" / Objectif "}
+                        {formatEuro(objectifAnnuel)} dépassé
+                      </p>
+                      <div
+                        className="inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium"
+                        style={{ backgroundColor: "#EF9F2720", color: "#EF9F27" }}
+                      >
+                        +{formatEuro(depassement)} au-dessus de l&apos;objectif ({Math.round(pctReel)}%)
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-1.5">
+                    <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
+                      <div
+                        className="h-full bg-brand-accent transition-all"
+                        style={{ width: `${Math.min((caEncaisse / objectifAnnuel) * 100, 100)}%` }}
+                      />
+                      <div
+                        className="h-full bg-brand-accent/30 transition-all"
+                        style={{ width: `${Math.min((caDevise / objectifAnnuel) * 100, Math.max(100 - (caEncaisse / objectifAnnuel) * 100, 0))}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-[#767676]">
+                      <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                      {" + "}
+                      <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
+                      {" / "}
+                      {formatEuro(objectifAnnuel)} objectif
+                    </p>
+                  </div>
+                );
+              })()
+            ) : selectedYear !== "all" ? (
               <div className="space-y-1.5">
                 <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
                   <div
                     className="h-full bg-brand-accent transition-all"
-                    style={{ width: `${Math.min((caEncaisse / objectifAnnuel) * 100, 100)}%` }}
+                    style={{
+                      width: `${caEncaisse + caDevise > 0 ? Math.min((caEncaisse / (caEncaisse + caDevise)) * 100, 100) : 0}%`,
+                    }}
                   />
                   <div
                     className="h-full bg-brand-accent/30 transition-all"
-                    style={{ width: `${Math.min((caDevise / objectifAnnuel) * 100, Math.max(100 - (caEncaisse / objectifAnnuel) * 100, 0))}%` }}
+                    style={{
+                      width: `${caEncaisse + caDevise > 0 ? Math.min((caDevise / (caEncaisse + caDevise)) * 100, 100) : 0}%`,
+                    }}
                   />
                 </div>
                 <p className="text-xs text-[#767676]">
-                  <span className="text-brand-accent">{formatEuro(caEncaisse)}</span>
+                  <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
                   {" + "}
-                  <span className="text-brand-accent/50">{formatEuro(caDevise)} signes</span>
-                  {" / "}
-                  {formatEuro(objectifAnnuel)}
+                  <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
                 </p>
+                <Link
+                  href="/objectifs"
+                  className="text-xs text-[#767676] hover:text-brand-accent transition underline-offset-2 hover:underline"
+                >
+                  Aucun objectif défini
+                </Link>
               </div>
             ) : (
               <p className="text-xs text-[#767676]">
-                <span className="text-brand-accent">{formatEuro(caEncaisse)} payes</span>
+                <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
                 {" + "}
-                <span className="text-brand-accent/50">{formatEuro(caDevise)} signes</span>
+                <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
               </p>
             )}
           </CardContent>

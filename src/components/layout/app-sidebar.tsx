@@ -8,8 +8,10 @@ import {
   FolderKanban,
   FileText,
   Clock,
+  CalendarDays,
   Target,
   Landmark,
+  Calculator,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -30,7 +32,9 @@ const navItems = [
   { title: "Projets", href: "/projets", icon: FolderKanban },
   { title: "Devis", href: "/devis", icon: FileText },
   { title: "Heures", href: "/heures", icon: Clock },
+  { title: "Calendrier", href: "/calendrier", icon: CalendarDays },
   { title: "Objectifs", href: "/objectifs", icon: Target },
+  { title: "Simulateur", href: "/simulateur", icon: Calculator },
   { title: "Tresorerie", href: "/abonnements", icon: Landmark },
   { title: "Paramètres", href: "/parametres", icon: Settings },
 ];

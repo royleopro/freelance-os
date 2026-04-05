@@ -3,6 +3,7 @@ import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { NextAuthProvider } from "@/components/session-provider";
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -36,7 +37,9 @@ export default function RootLayout({
         />
       </head>
       <body className="h-full">
-        <TooltipProvider>{children}</TooltipProvider>
+        <NextAuthProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </NextAuthProvider>
         <Toaster position="bottom-right" richColors />
       </body>
     </html>

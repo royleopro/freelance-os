@@ -10,9 +10,14 @@ import {
   ResponsiveContainer,
   ReferenceArea,
 } from "recharts";
-import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react";
+import { ChevronLeft, ChevronRight, BarChart3, Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import type { SessionHeureAvecProjet } from "@/lib/types";
+import type { SessionHeureAvecProjet, Devis } from "@/lib/types";
+import {
+  Tooltip as UITooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const PROJECT_PALETTE = [
   "#0ACF83", "#0891B2", "#06B6D4", "#10B981", "#34D399", "#6EE7B7", "#A78BFA",
@@ -148,9 +153,17 @@ function CustomTooltip({
   );
 }
 
+const formatEuro = (n: number): string =>
+  new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(n);
+
 export function SemaineChart() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [sessions, setSessions] = useState<SessionHeureAvecProjet[]>([]);
+  const [devis, setDevis] = useState<Devis[]>([]);
   const [loading, setLoading] = useState(true);
 
   const monday = useMemo(() => getMondayOf(weekOffset), [weekOffset]);
@@ -166,13 +179,20 @@ export function SemaineChart() {
   const fetchWeekSessions = useCallback(async () => {
     setLoading(true);
     const supabase = createClient();
-    const { data } = await supabase
-      .from("sessions_heures")
-      .select("*, projets(nom, type)")
-      .gte("date", toISO(monday))
-      .lte("date", toISO(sunday))
-      .order("date", { ascending: true });
-    setSessions((data as SessionHeureAvecProjet[]) ?? []);
+    const [sessionsRes, devisRes] = await Promise.all([
+      supabase
+        .from("sessions_heures")
+        .select("*, projets(nom, type)")
+        .gte("date", toISO(monday))
+        .lte("date", toISO(sunday))
+        .order("date", { ascending: true }),
+      supabase
+        .from("devis")
+        .select("*")
+        .eq("statut", "signe"),
+    ]);
+    setSessions((sessionsRes.data as SessionHeureAvecProjet[]) ?? []);
+    setDevis((devisRes.data as Devis[]) ?? []);
     setLoading(false);
   }, [monday, sunday]);
 
@@ -223,6 +243,43 @@ export function SemaineChart() {
     [data],
   );
 
+  // TJM par projet = montant_total / jours_signes du dernier devis signé
+  const valeurTempsBreakdown = useMemo(() => {
+    const tjmMap = new Map<string, number>();
+    const sorted = [...devis]
+      .filter((d) => d.jours_signes > 0)
+      .sort((a, b) => {
+        const da = a.date_signature ?? a.created_at;
+        const db = b.date_signature ?? b.created_at;
+        return db.localeCompare(da);
+      });
+    for (const d of sorted) {
+      if (d.projet_id && !tjmMap.has(d.projet_id)) {
+        tjmMap.set(d.projet_id, d.montant_total / d.jours_signes);
+      }
+    }
+
+    const byProjet = new Map<string, { nom: string; valeur: number }>();
+    for (const s of sessions) {
+      if (!s.facturable) continue;
+      const tjm = tjmMap.get(s.projet_id) || 0;
+      if (tjm <= 0) continue;
+      const val = s.duree * (tjm / 8);
+      const existing = byProjet.get(s.projet_id);
+      if (existing) existing.valeur += val;
+      else
+        byProjet.set(s.projet_id, {
+          nom: s.projets?.nom ?? "Inconnu",
+          valeur: val,
+        });
+    }
+    const list = [...byProjet.values()].sort((a, b) => b.valeur - a.valeur);
+    const total = list.reduce((sum, p) => sum + p.valeur, 0);
+    return { list, total };
+  }, [sessions, devis]);
+
+  const valeurTemps = valeurTempsBreakdown.total;
+
   const hasData = projectNames.length > 0 && totalSemaine > 0;
 
   return (
@@ -264,6 +321,46 @@ export function SemaineChart() {
       <div className="mt-3">
         <p className="text-xs text-[#767676]">Total</p>
         <p className="text-2xl font-bold text-white">{loading ? "…" : formatHeures(totalSemaine)}</p>
+        {!loading && valeurTemps > 0 && (
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm" style={{ color: "#0ACF83" }}>
+              Valeur temps : {formatEuro(Math.round(valeurTemps))}
+            </p>
+            <UITooltip>
+              <TooltipTrigger
+                render={
+                  <button className="text-[#767676] hover:text-[#0ACF83] transition">
+                    <Info className="size-3.5" />
+                  </button>
+                }
+              />
+              <TooltipContent
+                side="right"
+                className="max-w-xs !bg-[#1A1A1A] !text-white border border-[#2A2A2A] !px-3 !py-2"
+              >
+                <div className="space-y-1 min-w-[180px]">
+                  <p className="text-[11px] font-medium text-[#767676] mb-1.5">
+                    Détail par projet
+                  </p>
+                  {valeurTempsBreakdown.list.map((p) => (
+                    <div
+                      key={p.nom}
+                      className="flex items-center justify-between gap-3 text-xs"
+                    >
+                      <span className="text-white">{p.nom}</span>
+                      <span
+                        className="font-medium"
+                        style={{ color: "#0ACF83" }}
+                      >
+                        {formatEuro(Math.round(p.valeur))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </TooltipContent>
+            </UITooltip>
+          </div>
+        )}
       </div>
 
       {/* Chart */}

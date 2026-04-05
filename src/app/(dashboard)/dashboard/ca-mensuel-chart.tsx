@@ -15,6 +15,7 @@ interface ChartDataItem {
   objectif: number;
   paye: number;
   en_attente: number;
+  urssaf?: number;
 }
 
 interface PreparedItem extends ChartDataItem {
@@ -51,6 +52,11 @@ function CustomTooltip({
       <p style={{ color: "rgba(10,207,131,0.6)" }}>
         En attente : {formatEuro(d.en_attente)}
       </p>
+      {d.urssaf !== undefined && d.urssaf > 0 && (
+        <p style={{ color: "#EF9F27" }} className="mt-1 pt-1 border-t border-[rgba(255,255,255,0.06)]">
+          URSSAF estimée : {formatEuro(d.urssaf)}
+        </p>
+      )}
     </div>
   );
 }

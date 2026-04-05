@@ -28,7 +28,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Save, Target, AlertCircle, TrendingUp } from "lucide-react";
+import { Save, Target, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -38,21 +38,6 @@ const MOIS_LABELS = [
 ];
 
 const YEARS = [2024, 2025, 2026, 2027];
-
-const DEFAULT_OBJECTIFS = [
-  { tjm_cible: 350, jours_cibles: 11.4 },
-  { tjm_cible: 400, jours_cibles: 11 },
-  { tjm_cible: 400, jours_cibles: 12 },
-  { tjm_cible: 450, jours_cibles: 12 },
-  { tjm_cible: 450, jours_cibles: 13 },
-  { tjm_cible: 450, jours_cibles: 13 },
-  { tjm_cible: 450, jours_cibles: 5 },
-  { tjm_cible: 450, jours_cibles: 5 },
-  { tjm_cible: 450, jours_cibles: 11 },
-  { tjm_cible: 450, jours_cibles: 12 },
-  { tjm_cible: 450, jours_cibles: 12 },
-  { tjm_cible: 450, jours_cibles: 12 },
-];
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("fr-FR", {
@@ -64,7 +49,14 @@ const fmt = (n: number) =>
 interface ObjectifRow {
   mois: number;
   tjm_cible: string;
-  jours_cibles: string;
+  ca_cible: string;
+}
+
+function computeJours(caCible: string, tjmCible: string): number {
+  const ca = parseFloat(caCible) || 0;
+  const tjm = parseFloat(tjmCible) || 0;
+  if (tjm <= 0) return 0;
+  return Math.round((ca / tjm) * 10) / 10;
 }
 
 export default function ObjectifsPage() {
@@ -81,7 +73,7 @@ export default function ObjectifsPage() {
     setLoading(true);
     try {
       const supabase = createClient();
-      const [objectifsRes, transactionsRes, paramRes] = await Promise.all([
+      const [objectifsRes, transactionsRes] = await Promise.all([
         supabase
           .from("objectifs")
           .select("*")
@@ -93,31 +85,28 @@ export default function ObjectifsPage() {
           .eq("statut", "paye")
           .gte("date", `${selectedYear}-01-01`)
           .lte("date", `${selectedYear}-12-31`),
-        supabase
-          .from("parametres")
-          .select("*")
-          .eq("cle", `objectif_ca_annuel_${selectedYear}`)
-          .maybeSingle(),
       ]);
 
-      const firstError = objectifsRes.error || transactionsRes.error || paramRes.error;
+      const firstError = objectifsRes.error || transactionsRes.error;
       if (firstError) {
         setError("Impossible de charger les objectifs.");
         toast.error("Erreur de chargement", { description: firstError.message });
         return;
       }
 
-      setObjectifCaAnnuel(paramRes.data?.valeur ?? "");
-
       const dbObjectifs = (objectifsRes.data as Objectif[]) ?? [];
+
+      // Mois = 0 représente l'objectif annuel global
+      const annuel = dbObjectifs.find((o) => o.mois === 0);
+      setObjectifCaAnnuel(annuel ? String(annuel.ca_cible) : "");
+
       const rows: ObjectifRow[] = [];
       for (let m = 1; m <= 12; m++) {
         const existing = dbObjectifs.find((o) => o.mois === m);
-        const defaults = DEFAULT_OBJECTIFS[m - 1];
         rows.push({
           mois: m,
-          tjm_cible: String(existing?.tjm_cible ?? defaults.tjm_cible),
-          jours_cibles: String(existing?.jours_cibles ?? defaults.jours_cibles),
+          tjm_cible: existing ? String(existing.tjm_cible) : "450",
+          ca_cible: existing ? String(existing.ca_cible) : "",
         });
       }
       setObjectifs(rows);
@@ -137,7 +126,7 @@ export default function ObjectifsPage() {
 
   function updateObjectif(
     index: number,
-    field: "tjm_cible" | "jours_cibles",
+    field: "tjm_cible" | "ca_cible",
     value: string
   ) {
     setObjectifs((prev) => {
@@ -147,43 +136,71 @@ export default function ObjectifsPage() {
     });
   }
 
+  function repartirSurDouzeMois() {
+    const annuel = parseFloat(objectifCaAnnuel) || 0;
+    if (annuel <= 0) {
+      toast.error("Saisis d'abord un objectif annuel");
+      return;
+    }
+    const parMois = Math.round(annuel / 12);
+    setObjectifs((prev) =>
+      prev.map((o) => ({ ...o, ca_cible: String(parMois) }))
+    );
+    toast.success(`Répartition : ${fmt(parMois)} / mois`);
+  }
+
+  function handleAnnuelBlur() {
+    const annuel = parseFloat(objectifCaAnnuel) || 0;
+    if (annuel <= 0) return;
+    // Auto-répartition si tous les mois sont vides ou à 0
+    const tousVides = objectifs.every((o) => (parseFloat(o.ca_cible) || 0) === 0);
+    if (tousVides) {
+      const parMois = Math.round(annuel / 12);
+      setObjectifs((prev) =>
+        prev.map((o) => ({ ...o, ca_cible: String(parMois) }))
+      );
+    }
+  }
+
   async function saveObjectifs() {
     setSaving(true);
     const supabase = createClient();
 
-    const rows = objectifs.map((o) => ({
+    const monthlyRows = objectifs.map((o) => {
+      const tjm = parseFloat(o.tjm_cible) || 0;
+      const ca = parseFloat(o.ca_cible) || 0;
+      const jours = tjm > 0 ? Math.round((ca / tjm) * 10) / 10 : 0;
+      return {
+        annee: selectedYear,
+        mois: o.mois,
+        tjm_cible: tjm,
+        ca_cible: ca,
+        jours_cibles: jours,
+      };
+    });
+
+    const annuelRow = {
       annee: selectedYear,
-      mois: o.mois,
-      ca_cible: (parseFloat(o.tjm_cible) || 0) * (parseFloat(o.jours_cibles) || 0),
-      tjm_cible: parseFloat(o.tjm_cible) || 0,
-      jours_cibles: parseFloat(o.jours_cibles) || 0,
-    }));
+      mois: 0,
+      tjm_cible: 0,
+      ca_cible: parseFloat(objectifCaAnnuel) || 0,
+      jours_cibles: 0,
+    };
 
-    const [objRes, paramRes] = await Promise.all([
-      supabase.from("objectifs").upsert(rows, { onConflict: "annee,mois" }),
-      supabase.from("parametres").upsert({
-        cle: `objectif_ca_annuel_${selectedYear}`,
-        valeur: objectifCaAnnuel,
-        updated_at: new Date().toISOString(),
-      }),
-    ]);
+    const { error: err } = await supabase
+      .from("objectifs")
+      .upsert([annuelRow, ...monthlyRows], { onConflict: "annee,mois" });
 
-    const err = objRes.error || paramRes.error;
     if (err) {
       toast.error("Erreur de sauvegarde", { description: err.message });
     } else {
-      toast.success("Objectifs sauvegardes");
+      toast.success("Objectifs sauvegardés");
     }
     setSaving(false);
   }
 
-  const totalCaCible = useMemo(
-    () =>
-      objectifs.reduce(
-        (sum, o) =>
-          sum + (parseFloat(o.tjm_cible) || 0) * (parseFloat(o.jours_cibles) || 0),
-        0
-      ),
+  const totalMensuel = useMemo(
+    () => objectifs.reduce((sum, o) => sum + (parseFloat(o.ca_cible) || 0), 0),
     [objectifs]
   );
 
@@ -197,10 +214,9 @@ export default function ObjectifsPage() {
     return map;
   }, [transactions]);
 
-  const totalCaRealise = useMemo(
-    () => Object.values(caRealiseParMois).reduce((s, v) => s + v, 0),
-    [caRealiseParMois]
-  );
+  const objectifAnnuelNum = parseFloat(objectifCaAnnuel) || 0;
+  const ecartAnnuel = totalMensuel - objectifAnnuelNum;
+  const estEquilibre = objectifAnnuelNum > 0 && Math.abs(ecartAnnuel) < 1;
 
   if (loading) {
     return (
@@ -251,9 +267,9 @@ export default function ObjectifsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Objectifs</h1>
-          <p className="text-muted-foreground">
-            Definissez et suivez vos objectifs de chiffre d&apos;affaires.
+          <h1 className="text-2xl font-bold font-heading">Objectifs</h1>
+          <p className="text-[#767676]">
+            Définissez et suivez vos objectifs de chiffre d&apos;affaires.
           </p>
         </div>
         <Select
@@ -273,52 +289,81 @@ export default function ObjectifsPage() {
         </Select>
       </div>
 
-      {/* Section 1 : Edition des objectifs */}
+      {/* Objectif annuel */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Target className="size-4" />
-            Objectifs CA {selectedYear}
+            Objectif CA annuel {selectedYear}
           </CardTitle>
           <CardDescription>
-            Total CA cible mensuel : {fmt(totalCaCible)}
+            Définis ton objectif annuel puis répartis-le sur 12 mois.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-4">
-            <label className="text-sm font-medium whitespace-nowrap">
-              Objectif CA annuel global
-            </label>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-3">
             <Input
               type="number"
               min="0"
               step="1000"
-              className="w-40"
+              className="w-48"
               placeholder="Ex: 60000"
               value={objectifCaAnnuel}
               onChange={(e) => setObjectifCaAnnuel(e.target.value)}
+              onBlur={handleAnnuelBlur}
             />
-            {objectifCaAnnuel && (
-              <span className="text-sm text-muted-foreground">
-                {fmt(parseFloat(objectifCaAnnuel) || 0)}
-              </span>
-            )}
+            <Button variant="outline" onClick={repartirSurDouzeMois}>
+              Répartir sur 12 mois
+            </Button>
           </div>
 
+          {objectifAnnuelNum > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-[#767676]">
+                Total mensuel : {fmt(totalMensuel)}
+              </span>
+              {estEquilibre ? (
+                <span className="flex items-center gap-1" style={{ color: "#0ACF83" }}>
+                  <CheckCircle2 className="size-3.5" />
+                  Équilibré
+                </span>
+              ) : (
+                <span className="text-orange-400">
+                  Écart : {ecartAnnuel >= 0 ? "+" : ""}
+                  {fmt(ecartAnnuel)} — ajuste tes mois pour équilibrer
+                </span>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Tableau objectifs mensuels */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Objectifs mensuels {selectedYear}</CardTitle>
+          <CardDescription>
+            Les jours cibles sont calculés automatiquement (CA ÷ TJM).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Mois</TableHead>
-                <TableHead>TJM cible (EUR)</TableHead>
-                <TableHead>Jours cibles</TableHead>
+                <TableHead>TJM cible</TableHead>
                 <TableHead>CA mensuel cible</TableHead>
+                <TableHead className="text-right">Jours cibles</TableHead>
+                <TableHead className="text-right">CA réalisé</TableHead>
+                <TableHead className="text-right">Écart</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {objectifs.map((o, i) => {
-                const caCible =
-                  (parseFloat(o.tjm_cible) || 0) *
-                  (parseFloat(o.jours_cibles) || 0);
+                const jours = computeJours(o.ca_cible, o.tjm_cible);
+                const ca = parseFloat(o.ca_cible) || 0;
+                const realise = caRealiseParMois[o.mois] ?? 0;
+                const ecart = realise - ca;
                 return (
                   <TableRow key={o.mois}>
                     <TableCell className="font-medium">
@@ -328,8 +373,8 @@ export default function ObjectifsPage() {
                       <Input
                         type="number"
                         min="0"
-                        step="1"
-                        className="w-28"
+                        step="10"
+                        className="w-24"
                         value={o.tjm_cible}
                         onChange={(e) =>
                           updateObjectif(i, "tjm_cible", e.target.value)
@@ -340,15 +385,24 @@ export default function ObjectifsPage() {
                       <Input
                         type="number"
                         min="0"
-                        step="0.5"
-                        className="w-24"
-                        value={o.jours_cibles}
+                        step="100"
+                        className="w-28"
+                        value={o.ca_cible}
                         onChange={(e) =>
-                          updateObjectif(i, "jours_cibles", e.target.value)
+                          updateObjectif(i, "ca_cible", e.target.value)
                         }
                       />
                     </TableCell>
-                    <TableCell className="font-medium">{fmt(caCible)}</TableCell>
+                    <TableCell className="text-right text-[#767676]">
+                      {jours > 0 ? `${jours} j` : "—"}
+                    </TableCell>
+                    <TableCell className="text-right">{fmt(realise)}</TableCell>
+                    <TableCell
+                      className="text-right"
+                      style={{ color: ecart >= 0 ? "#0ACF83" : "#f87171" }}
+                    >
+                      {ca > 0 ? `${ecart >= 0 ? "+" : ""}${fmt(ecart)}` : "—"}
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -357,8 +411,14 @@ export default function ObjectifsPage() {
               <TableRow>
                 <TableCell className="font-bold">Total</TableCell>
                 <TableCell />
+                <TableCell className="font-bold">{fmt(totalMensuel)}</TableCell>
                 <TableCell />
-                <TableCell className="font-bold">{fmt(totalCaCible)}</TableCell>
+                <TableCell className="text-right font-bold">
+                  {fmt(
+                    Object.values(caRealiseParMois).reduce((s, v) => s + v, 0)
+                  )}
+                </TableCell>
+                <TableCell />
               </TableRow>
             </TableFooter>
           </Table>
@@ -367,87 +427,6 @@ export default function ObjectifsPage() {
             <Save data-icon="inline-start" />
             {saving ? "Enregistrement..." : "Sauvegarder"}
           </Button>
-        </CardContent>
-      </Card>
-
-      {/* Section 2 : Tableau comparatif */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="size-4" />
-            Suivi {selectedYear}
-          </CardTitle>
-          <CardDescription>
-            Comparaison objectifs vs CA realise (transactions payees).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Mois</TableHead>
-                <TableHead className="text-right">CA cible</TableHead>
-                <TableHead className="text-right">CA realise</TableHead>
-                <TableHead className="text-right">Ecart</TableHead>
-                <TableHead className="text-right">% atteinte</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {objectifs.map((o) => {
-                const cible =
-                  (parseFloat(o.tjm_cible) || 0) *
-                  (parseFloat(o.jours_cibles) || 0);
-                const realise = caRealiseParMois[o.mois] ?? 0;
-                const ecart = realise - cible;
-                const pct = cible > 0 ? (realise / cible) * 100 : 0;
-                return (
-                  <TableRow key={o.mois}>
-                    <TableCell className="font-medium">
-                      {MOIS_LABELS[o.mois - 1]}
-                    </TableCell>
-                    <TableCell className="text-right">{fmt(cible)}</TableCell>
-                    <TableCell className="text-right">{fmt(realise)}</TableCell>
-                    <TableCell
-                      className={`text-right ${ecart >= 0 ? "text-green-500" : "text-red-500"}`}
-                    >
-                      {ecart >= 0 ? "+" : ""}
-                      {fmt(ecart)}
-                    </TableCell>
-                    <TableCell
-                      className={`text-right ${pct >= 100 ? "text-green-500" : pct >= 75 ? "text-yellow-500" : "text-red-500"}`}
-                    >
-                      {pct.toFixed(0)}%
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-            <TableFooter>
-              <TableRow>
-                <TableCell className="font-bold">Total</TableCell>
-                <TableCell className="text-right font-bold">
-                  {fmt(totalCaCible)}
-                </TableCell>
-                <TableCell className="text-right font-bold">
-                  {fmt(totalCaRealise)}
-                </TableCell>
-                <TableCell
-                  className={`text-right font-bold ${totalCaRealise - totalCaCible >= 0 ? "text-green-500" : "text-red-500"}`}
-                >
-                  {totalCaRealise - totalCaCible >= 0 ? "+" : ""}
-                  {fmt(totalCaRealise - totalCaCible)}
-                </TableCell>
-                <TableCell
-                  className={`text-right font-bold ${totalCaCible > 0 && (totalCaRealise / totalCaCible) * 100 >= 100 ? "text-green-500" : "text-red-500"}`}
-                >
-                  {totalCaCible > 0
-                    ? ((totalCaRealise / totalCaCible) * 100).toFixed(0)
-                    : 0}
-                  %
-                </TableCell>
-              </TableRow>
-            </TableFooter>
-          </Table>
         </CardContent>
       </Card>
     </div>
