@@ -96,12 +96,17 @@ export default function SimulateurPage() {
     };
   }, [montantBrut, hasTaux, tauxUrssaf, tauxImpots]);
 
-  // ─── URSSAF par mois ────────────────────────────────
+  // ─── URSSAF + Impôts par mois ──────────────────────
   const urssafParMois = useMemo(() => {
     if (!hasTaux) return [];
     const now = new Date();
-    const mois: { annee: number; mois: number; ca: number; urssaf: number }[] =
-      [];
+    const mois: {
+      annee: number;
+      mois: number;
+      ca: number;
+      urssaf: number;
+      impots: number;
+    }[] = [];
 
     // 3 derniers mois + mois en cours = 4 mois
     for (let i = 3; i >= 0; i--) {
@@ -124,10 +129,11 @@ export default function SimulateurPage() {
         mois: moisIdx,
         ca,
         urssaf: ca * tauxUrssaf,
+        impots: ca * tauxImpots,
       });
     }
     return mois;
-  }, [transactions, hasTaux, tauxUrssaf]);
+  }, [transactions, hasTaux, tauxUrssaf, tauxImpots]);
 
   const moisEnCours = urssafParMois[urssafParMois.length - 1];
   const historique = urssafParMois.slice(0, -1).reverse();
@@ -322,31 +328,49 @@ export default function SimulateurPage() {
           </CardContent>
         </Card>
 
-        {/* ═══ URSSAF à déclarer ═══ */}
+        {/* ═══ URSSAF + Impôts à déclarer ═══ */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Landmark className="size-4" />
-              URSSAF à déclarer
+              URSSAF & impôts à déclarer
             </CardTitle>
             <CardDescription>
-              Basé sur les transactions payées du mois
+              Basé sur le CA encaissé du mois
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Mois en cours */}
             {moisEnCours && (
               <div className="rounded-lg border border-[rgba(10,207,131,0.15)] bg-[rgba(10,207,131,0.04)] p-4">
-                <p className="text-xs text-[#767676] mb-1">
+                <p className="text-xs text-[#767676] mb-3">
                   {MOIS_LABELS[moisEnCours.mois]} {moisEnCours.annee} (en cours)
                 </p>
-                <p
-                  className="text-2xl font-bold"
-                  style={{ color: "#EF9F27" }}
-                >
-                  {fmt(moisEnCours.urssaf)}
-                </p>
-                <p className="text-xs text-[#767676] mt-1">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[11px] text-[#767676] mb-0.5">
+                      URSSAF ({(tauxUrssaf * 100).toFixed(1)}%)
+                    </p>
+                    <p
+                      className="text-2xl font-bold"
+                      style={{ color: "#EF9F27" }}
+                    >
+                      {fmt(moisEnCours.urssaf)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-[#767676] mb-0.5">
+                      Impôts ({(tauxImpots * 100).toFixed(1)}%)
+                    </p>
+                    <p
+                      className="text-2xl font-bold"
+                      style={{ color: "#EF4444" }}
+                    >
+                      {fmt(moisEnCours.impots)}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-[#767676] mt-3">
                   Basé sur {fmt(moisEnCours.ca)} de CA encaissé
                 </p>
               </div>
@@ -371,14 +395,25 @@ export default function SimulateurPage() {
                         {fmt(m.ca)} de CA
                       </p>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <Receipt className="size-3.5 text-[#767676]" />
-                      <span
-                        className="text-sm font-medium"
-                        style={{ color: "#EF9F27" }}
-                      >
-                        {fmt(m.urssaf)}
-                      </span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <Landmark className="size-3.5 text-[#767676]" />
+                        <span
+                          className="text-sm font-medium"
+                          style={{ color: "#EF9F27" }}
+                        >
+                          {fmt(m.urssaf)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Receipt className="size-3.5 text-[#767676]" />
+                        <span
+                          className="text-sm font-medium"
+                          style={{ color: "#EF4444" }}
+                        >
+                          {fmt(m.impots)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}

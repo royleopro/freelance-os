@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -34,13 +34,20 @@ import {
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   ArrowLeft,
   Calendar,
+  Check,
   Clock,
   Euro,
   FileText,
   Pencil,
   Plus,
+  Tag,
   TrendingUp,
   User,
   Wallet,
@@ -156,6 +163,10 @@ export default function ProjetDetailPage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [paiementsDevis, setPaiementsDevis] = useState<Devis | null>(null);
   const [unlinkedQontoDevis, setUnlinkedQontoDevis] = useState<Devis[]>([]);
+  const [descriptionValue, setDescriptionValue] = useState("");
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [savingDescription, setSavingDescription] = useState(false);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -256,6 +267,27 @@ export default function ProjetDetailPage() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (projet) setDescriptionValue(projet.description ?? "");
+  }, [projet]);
+
+  async function saveDescription() {
+    setSavingDescription(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("projets")
+      .update({ description: descriptionValue || null })
+      .eq("id", params.id);
+    setSavingDescription(false);
+    if (error) {
+      toast.error("Erreur", { description: "Impossible de sauvegarder la description." });
+    } else {
+      toast.success("Description sauvegardee");
+      setEditingDescription(false);
+      fetchData();
+    }
+  }
+
   const totalHeures = sessions.reduce((sum, s) => sum + s.duree, 0);
   const heuresFacturables = sessions
     .filter((s) => s.facturable)
@@ -273,6 +305,38 @@ export default function ProjetDetailPage() {
     .reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
   const totalHeuresSignees = totalJoursSignes * 8;
   const pctAvancement = totalHeuresSignees > 0 ? (heuresFacturables / totalHeuresSignees) * 100 : 0;
+
+  // TJM basé sur le dernier devis signé
+  const tjmDevis = (() => {
+    const signed = devisList
+      .filter((d) => d.statut === "signe" && d.jours_signes && d.jours_signes > 0)
+      .sort((a, b) => {
+        const da = a.date_signature ?? a.created_at;
+        const db = b.date_signature ?? b.created_at;
+        return db.localeCompare(da);
+      });
+    if (signed.length === 0) return null;
+    const d = signed[0];
+    return {
+      valeur: Math.round(d.montant_total / d.jours_signes),
+      libelle: d.libelle,
+      date: d.date_signature,
+    };
+  })();
+
+  // Top etiquettes (pour projets interne/prospect)
+  const topEtiquettes = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of sessions) {
+      map.set(s.etiquette, (map.get(s.etiquette) ?? 0) + s.duree);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([etiquette, duree]) => ({ etiquette, duree, config: getEtiquette(etiquette) }));
+  }, [sessions]);
+
+  const derniereSession = sessions.length > 0 ? sessions[0] : null; // already sorted desc
 
   // Attribution chronologique des heures facturables par devis
   const heuresAttribueesParDevis = computeHeuresParDevis(
@@ -397,75 +461,77 @@ export default function ProjetDetailPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription className="flex items-center gap-1.5">
-              <Euro className="size-3.5" />
-              Total CA
-            </CardDescription>
-            <CardTitle className="text-xl">
-              {formatEuro(totalCA)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
+      {projet.type === "client" && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <Card size="sm">
+            <CardHeader>
+              <CardDescription className="flex items-center gap-1.5">
                 <Euro className="size-3.5" />
-                Paye
-              </span>
-              <Badge variant="outline" className={paiementStatus.className}>
-                {paiementStatus.label}
-              </Badge>
-            </CardDescription>
-            <CardTitle className="text-xl">
-              {formatEuro(totalPaye)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
+                Total CA
+              </CardDescription>
+              <CardTitle className="text-xl">
+                {formatEuro(totalCA)}
+              </CardTitle>
+            </CardHeader>
+          </Card>
 
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription className="flex items-center gap-1.5">
-              <Euro className="size-3.5" />
-              Signe
-            </CardDescription>
-            <CardTitle className="text-xl">
-              {formatEuro(totalSigne)}
-            </CardTitle>
-          </CardHeader>
-        </Card>
+          <Card size="sm">
+            <CardHeader>
+              <CardDescription className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Euro className="size-3.5" />
+                  Paye
+                </span>
+                <Badge variant="outline" className={paiementStatus.className}>
+                  {paiementStatus.label}
+                </Badge>
+              </CardDescription>
+              <CardTitle className="text-xl">
+                {formatEuro(totalPaye)}
+              </CardTitle>
+            </CardHeader>
+          </Card>
 
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription className="flex items-center gap-1.5">
-              <Clock className="size-3.5" />
-              Heures loguees
-            </CardDescription>
-            <CardTitle className="text-xl">{totalHeures.toFixed(1)}h</CardTitle>
-          </CardHeader>
-        </Card>
+          <Card size="sm">
+            <CardHeader>
+              <CardDescription className="flex items-center gap-1.5">
+                <Euro className="size-3.5" />
+                Signe
+              </CardDescription>
+              <CardTitle className="text-xl">
+                {formatEuro(totalSigne)}
+              </CardTitle>
+            </CardHeader>
+          </Card>
 
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription className="flex items-center gap-1.5">
-              <TrendingUp className="size-3.5" />
-              Rentabilite reelle
-            </CardDescription>
-            <CardTitle className="text-xl">
-              {rentabiliteEurH !== null
-                ? formatEuro(rentabiliteEurH) + "/h"
-                : "—"}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
+          <Card size="sm">
+            <CardHeader>
+              <CardDescription className="flex items-center gap-1.5">
+                <Clock className="size-3.5" />
+                Heures loguees
+              </CardDescription>
+              <CardTitle className="text-xl">{totalHeures.toFixed(1)}h</CardTitle>
+            </CardHeader>
+          </Card>
+
+          <Card size="sm">
+            <CardHeader>
+              <CardDescription className="flex items-center gap-1.5">
+                <TrendingUp className="size-3.5" />
+                Rentabilite reelle
+              </CardDescription>
+              <CardTitle className="text-xl">
+                {rentabiliteEurH !== null
+                  ? formatEuro(rentabiliteEurH) + "/h"
+                  : "—"}
+              </CardTitle>
+            </CardHeader>
+          </Card>
+        </div>
+      )}
 
       {/* Recap avancement heures */}
-      {totalJoursSignes > 0 && (
+      {projet.type === "client" && totalJoursSignes > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -497,67 +563,242 @@ export default function ProjetDetailPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Informations</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <User className="size-3" />
-                Client
-              </p>
-              <p className="font-medium">{projet.client || "—"}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">TJM</p>
-              <p className="font-medium">
-                {projet.tjm > 0 ? formatEuro(projet.tjm) + "/j" : "—"}
-              </p>
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Calendar className="size-3" />
-                Date debut
-              </p>
-              <p className="font-medium">{formatDate(projet.date_debut)}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                <Calendar className="size-3" />
-                Deadline
-              </p>
-              <p className="font-medium">{formatDate(projet.deadline)}</p>
-            </div>
-          </div>
-
-          {rentabiliteEurH !== null && (
-            <>
-              <Separator />
+      {projet.type === "client" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Informations</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">
-                  Rentabilite reelle
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <User className="size-3" />
+                  Client
                 </p>
-                <p className="text-sm text-muted-foreground">
-                  {formatEuro(totalPaye)} /{" "}
-                  {totalHeures.toFixed(1)}h total ={" "}
-                  <span className="font-medium text-foreground">
-                    {formatEuro(rentabiliteEurH)}/h
-                  </span>
-                </p>
+                <p className="font-medium">{projet.client || "—"}</p>
               </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">TJM</p>
+                {tjmDevis ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <p className="font-medium cursor-default" style={{ color: "#0ACF83" }}>
+                          {formatEuro(tjmDevis.valeur)}/j
+                        </p>
+                      }
+                    />
+                    <TooltipContent>
+                      Base sur le devis &quot;{tjmDevis.libelle}&quot;{tjmDevis.date ? ` signe le ${new Date(tjmDevis.date).toLocaleDateString("fr-FR")}` : ""}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <p className="font-medium">
+                    {projet.tjm > 0 ? formatEuro(projet.tjm) + "/j" : "—"}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Calendar className="size-3" />
+                  Date debut
+                </p>
+                <p className="font-medium">{formatDate(projet.date_debut)}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Calendar className="size-3" />
+                  Deadline
+                </p>
+                <p className="font-medium">{formatDate(projet.deadline)}</p>
+              </div>
+            </div>
+
+            {rentabiliteEurH !== null && (
+              <>
+                <Separator />
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">
+                    Rentabilite reelle
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatEuro(totalPaye)} /{" "}
+                    {totalHeures.toFixed(1)}h total ={" "}
+                    <span className="font-medium text-foreground">
+                      {formatEuro(rentabiliteEurH)}/h
+                    </span>
+                  </p>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Informations — interne / prospect */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Informations</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Statut</p>
+                  <Badge variant="outline" className={config.className}>
+                    {config.label}
+                  </Badge>
+                </div>
+                {projet.date_debut && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Calendar className="size-3" />
+                      Date debut
+                    </p>
+                    <p className="font-medium">{formatDate(projet.date_debut)}</p>
+                  </div>
+                )}
+              </div>
+
+              {projet.type === "prospect" && (
+                <>
+                  <Separator />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <User className="size-3" />
+                        Client potentiel
+                      </p>
+                      <p className="font-medium">{projet.client || "—"}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Statut prospection</p>
+                      <Badge variant="outline" className={statutConfig[projet.statut].className}>
+                        {statutConfig[projet.statut].label}
+                      </Badge>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <Separator />
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">Description / Objectif</p>
+                  {!editingDescription ? (
+                    <button
+                      onClick={() => {
+                        setEditingDescription(true);
+                        setTimeout(() => descriptionRef.current?.focus(), 0);
+                      }}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <Pencil className="size-3" />
+                      Modifier
+                    </button>
+                  ) : (
+                    <button
+                      onClick={saveDescription}
+                      disabled={savingDescription}
+                      className="text-xs hover:text-foreground transition-colors cursor-pointer flex items-center gap-1"
+                      style={{ color: "#0ACF83" }}
+                    >
+                      <Check className="size-3" />
+                      {savingDescription ? "..." : "Enregistrer"}
+                    </button>
+                  )}
+                </div>
+                {editingDescription ? (
+                  <textarea
+                    ref={descriptionRef}
+                    value={descriptionValue}
+                    onChange={(e) => setDescriptionValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setEditingDescription(false);
+                        setDescriptionValue(projet.description ?? "");
+                      }
+                    }}
+                    placeholder="Decrire l'objectif de ce projet..."
+                    className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-y min-h-[60px]"
+                    rows={3}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                    {projet.description || "Aucune description"}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Activite — interne / prospect */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="size-4" />
+                Activite
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Total heures loguees</p>
+                <p className="text-xl font-bold">{totalHeures.toFixed(1)}h</p>
+              </div>
+
+              {topEtiquettes.length > 0 && (
+                <>
+                  <Separator />
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Tag className="size-3" />
+                      Top etiquettes
+                    </p>
+                    <p className="text-sm">
+                      {topEtiquettes.map((e, i) => (
+                        <span key={e.etiquette}>
+                          {i > 0 && <span className="text-muted-foreground"> · </span>}
+                          <span style={{ color: e.config.color }}>{e.config.label}</span>
+                          <span className="text-muted-foreground"> {e.duree}h</span>
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {derniereSession && (
+                <>
+                  <Separator />
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">Derniere session</p>
+                    <p className="text-sm">
+                      {new Date(derniereSession.date).toLocaleDateString("fr-FR", {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "long",
+                      })}
+                      <span className="text-muted-foreground"> — </span>
+                      <Badge variant="outline" className={getEtiquette(derniereSession.etiquette).className}>
+                        {getEtiquette(derniereSession.etiquette).label}
+                      </Badge>
+                      <span className="text-muted-foreground"> {derniereSession.duree}h</span>
+                    </p>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       {/* Section Devis */}
+      {projet.type === "client" && (<>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -846,8 +1087,10 @@ export default function ProjetDetailPage() {
         onOpenChange={setDevisDialogOpen}
         onCreated={fetchData}
       />
+      </>)}
 
       {/* Section Paiements */}
+      {projet.type === "client" && (<>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -964,6 +1207,7 @@ export default function ProjetDetailPage() {
         onOpenChange={setPaiementDialogOpen}
         onCreated={fetchData}
       />
+      </>)}
 
       {/* Section Heures */}
       <Card>

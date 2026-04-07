@@ -39,6 +39,7 @@ export interface Projet {
   heures_passees: number;
   date_debut: string | null;
   deadline: string | null;
+  description: string | null;
   created_at: string;
   updated_at: string;
   // Computed from projets_with_ca view

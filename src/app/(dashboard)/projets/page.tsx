@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Projet, ProjetStatut, ProjetType } from "@/lib/types";
+import type { Projet, ProjetStatut, ProjetType, Devis } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,11 @@ import {
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ProjetDialog } from "./projet-dialog";
 import { toast } from "sonner";
 
@@ -66,7 +71,7 @@ const typeConfig: Record<ProjetType, { label: string; className: string }> = {
 const TYPES: ("tous" | ProjetType)[] = ["tous", "client", "interne", "prospect"];
 const STATUTS: ("tous" | ProjetStatut)[] = ["tous", "en_cours", "cloture", "pas_signe", "prospection"];
 
-type SortField = "nom" | "paye" | "heures" | "rentabilite";
+type SortField = "nom" | "paye" | "heures" | "tjm" | "rentabilite";
 type SortDir = "asc" | "desc";
 
 function formatEuro(n: number) {
@@ -122,6 +127,7 @@ export default function ProjetsPage() {
 
   const [projets, setProjets] = useState<Projet[]>([]);
   const [heuresParProjet, setHeuresParProjet] = useState<Record<string, number>>({});
+  const [tjmParProjet, setTjmParProjet] = useState<Record<string, { valeur: number; libelle: string; montant: number; jours: number }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -182,12 +188,17 @@ export default function ProjetsPage() {
         return { data: all, error: null };
       }
 
-      const [projetsRes, sessionsRes] = await Promise.all([
+      const [projetsRes, sessionsRes, devisRes] = await Promise.all([
         supabase
           .from("projets_with_ca")
           .select("*")
           .order("created_at", { ascending: false }),
         fetchAllSessionRows(),
+        supabase
+          .from("devis")
+          .select("projet_id, montant_total, jours_signes, libelle, date_signature, created_at")
+          .eq("statut", "signe")
+          .gt("jours_signes", 0),
       ]);
       if (projetsRes.error) {
         setError("Impossible de charger les projets.");
@@ -201,6 +212,25 @@ export default function ProjetsPage() {
         map[s.projet_id] = (map[s.projet_id] ?? 0) + s.duree;
       }
       setHeuresParProjet(map);
+
+      // Dernier devis signé par projet → TJM
+      const tjmMap: Record<string, { valeur: number; libelle: string; montant: number; jours: number }> = {};
+      const devisSorted = ((devisRes.data as Devis[]) ?? []).sort((a, b) => {
+        const da = a.date_signature ?? a.created_at;
+        const db = b.date_signature ?? b.created_at;
+        return db.localeCompare(da);
+      });
+      for (const d of devisSorted) {
+        if (d.projet_id && !tjmMap[d.projet_id]) {
+          tjmMap[d.projet_id] = {
+            valeur: Math.round(d.montant_total / d.jours_signes),
+            libelle: d.libelle,
+            montant: d.montant_total,
+            jours: d.jours_signes,
+          };
+        }
+      }
+      setTjmParProjet(tjmMap);
       setError(null);
     } catch {
       setError("Impossible de charger les projets.");
@@ -236,6 +266,12 @@ export default function ProjetsPage() {
         case "heures":
           cmp = (heuresParProjet[a.id] ?? 0) - (heuresParProjet[b.id] ?? 0);
           break;
+        case "tjm": {
+          const ta = tjmParProjet[a.id]?.valeur ?? -Infinity;
+          const tb = tjmParProjet[b.id]?.valeur ?? -Infinity;
+          cmp = ta - tb;
+          break;
+        }
         case "rentabilite": {
           const ra = rentabiliteValue(a.montant_paye, heuresParProjet[a.id] ?? 0) ?? -Infinity;
           const rb = rentabiliteValue(b.montant_paye, heuresParProjet[b.id] ?? 0) ?? -Infinity;
@@ -247,7 +283,7 @@ export default function ProjetsPage() {
     });
 
     return list;
-  }, [projets, heuresParProjet, filterType, filterStatut, searchQuery, sortField, sortDir]);
+  }, [projets, heuresParProjet, tjmParProjet, filterType, filterStatut, searchQuery, sortField, sortDir]);
 
   function openCreate() {
     setEditingProjet(null);
@@ -297,7 +333,7 @@ export default function ProjetsPage() {
       {/* Filters */}
       {!loading && !error && (
         <Card>
-          <CardContent className="pt-6 space-y-4">
+          <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-6">
               <div className="space-y-1.5">
                 <p className="text-xs text-muted-foreground font-medium">Type</p>
@@ -411,6 +447,11 @@ export default function ProjetsPage() {
                       </button>
                     </TableHead>
                     <TableHead className="text-right">
+                      <button className="flex items-center gap-1 ml-auto cursor-pointer hover:text-foreground" onClick={() => toggleSort("tjm")}>
+                        TJM <SortIcon field="tjm" />
+                      </button>
+                    </TableHead>
+                    <TableHead className="text-right">
                       <button className="flex items-center gap-1 ml-auto cursor-pointer hover:text-foreground" onClick={() => toggleSort("rentabilite")}>
                         EUR/h <SortIcon field="rentabilite" />
                       </button>
@@ -421,6 +462,8 @@ export default function ProjetsPage() {
                 <TableBody>
                   {filteredProjets.map((projet) => {
                     const config = statutConfig[projet.statut];
+                    const isClient = projet.type === "client";
+                    const naCell = <span style={{ color: "#2A2A2A" }}>—</span>;
                     return (
                       <TableRow key={projet.id} className="group">
                         <TableCell>
@@ -448,21 +491,38 @@ export default function ProjetsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {formatEuro(projet.montant_signe)}
+                          {isClient ? formatEuro(projet.montant_signe) : naCell}
                         </TableCell>
                         <TableCell className="text-right">
-                          {formatEuro(projet.montant_paye)}
+                          {isClient ? formatEuro(projet.montant_paye) : naCell}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {(heuresParProjet[projet.id] ?? 0) > 0
                             ? `${Math.round((heuresParProjet[projet.id]) * 10) / 10}h`
                             : "—"}
                         </TableCell>
-                        <TableCell className="text-right font-medium">
-                          {rentabiliteLabel(
-                            projet.montant_paye,
-                            heuresParProjet[projet.id] ?? 0
+                        <TableCell className="text-right">
+                          {!isClient ? naCell : tjmParProjet[projet.id] ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="font-medium cursor-default">
+                                    {formatEuro(tjmParProjet[projet.id].valeur)}/j
+                                  </span>
+                                }
+                              />
+                              <TooltipContent>
+                                Base sur le devis &quot;{tjmParProjet[projet.id].libelle}&quot; — {formatEuro(tjmParProjet[projet.id].montant)} / {tjmParProjet[projet.id].jours}j
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="text-[#767676]">—</span>
                           )}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {isClient
+                            ? rentabiliteLabel(projet.montant_paye, heuresParProjet[projet.id] ?? 0)
+                            : naCell}
                         </TableCell>
                         <TableCell>
                           <DropdownMenu>

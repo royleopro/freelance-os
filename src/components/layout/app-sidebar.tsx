@@ -12,6 +12,7 @@ import {
   Target,
   Landmark,
   Calculator,
+  FileBarChart,
   Settings,
   LogOut,
 } from "lucide-react";
@@ -36,6 +37,7 @@ const navItems = [
   { title: "Objectifs", href: "/objectifs", icon: Target },
   { title: "Simulateur", href: "/simulateur", icon: Calculator },
   { title: "Tresorerie", href: "/abonnements", icon: Landmark },
+  { title: "Rapport", href: "/rapport", icon: FileBarChart },
   { title: "Paramètres", href: "/parametres", icon: Settings },
 ];
 

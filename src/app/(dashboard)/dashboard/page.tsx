@@ -371,15 +371,26 @@ export default function DashboardPage() {
   }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
 
   // ───── KPI: Jours signes (current year) ─────
-  const joursSignes = useMemo(() => {
+  const devisSignesAnnee = useMemo(() => {
     const year = CURRENT_YEAR;
-    return allDevis
-      .filter((d) => {
-        const sigDate = d.date_signature ?? d.created_at;
-        return new Date(sigDate).getFullYear() === year;
-      })
-      .reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
-  }, [allDevis]);
+    return allDevis.filter((d) => {
+      if (!d.projet_id || !clientProjetIds.has(d.projet_id)) return false;
+      const sigDate = d.date_signature ?? d.created_at;
+      return new Date(sigDate).getFullYear() === year;
+    });
+  }, [allDevis, clientProjetIds]);
+
+  const joursSignes = useMemo(
+    () => devisSignesAnnee.reduce((sum, d) => sum + (d.jours_signes ?? 0), 0),
+    [devisSignesAnnee]
+  );
+
+  const tjmMoyenPondere = useMemo(() => {
+    const totalJours = devisSignesAnnee.reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
+    if (totalJours === 0) return null;
+    const totalMontant = devisSignesAnnee.reduce((sum, d) => sum + (d.montant_total ?? 0), 0);
+    return { valeur: Math.round(totalMontant / totalJours), nbDevis: devisSignesAnnee.length };
+  }, [devisSignesAnnee]);
 
   // ───── KPI: Tresorerie ─────
   const todayDate = new Date().toISOString().split("T")[0];
@@ -907,6 +918,20 @@ export default function DashboardPage() {
             <p className="text-xs text-[#767676]">
               {(joursSignes * 8).toFixed(0)}h equivalentes
             </p>
+            {tjmMoyenPondere && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <p className="mt-1 text-xs font-medium cursor-default" style={{ color: "#0ACF83" }}>
+                      TJM moyen : {tjmMoyenPondere.valeur} €/j
+                    </p>
+                  }
+                />
+                <TooltipContent>
+                  Calcule sur {tjmMoyenPondere.nbDevis} devis signe{tjmMoyenPondere.nbDevis > 1 ? "s" : ""} — pondere par le nombre de jours
+                </TooltipContent>
+              </Tooltip>
+            )}
           </CardContent>
         </Card>
       </div>
