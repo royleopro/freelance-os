@@ -252,19 +252,16 @@ export default function ParametresPage() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="frais_mensuels_fixes">
-                Frais mensuels fixes (EUR)
-              </Label>
-              <Input
-                id="frais_mensuels_fixes"
-                type="number"
-                min="0"
-                step="0.01"
-                value={finance.frais_mensuels_fixes}
-                onChange={(e) =>
-                  updateFinance("frais_mensuels_fixes", e.target.value)
-                }
-              />
+              <Label>Frais mensuels fixes (EUR)</Label>
+              <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-sm text-muted-foreground">
+                {parseFloat(finance.frais_mensuels_fixes).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Calcule automatiquement depuis les{" "}
+                <Link href="/abonnements" className="underline hover:text-foreground">
+                  abonnements
+                </Link>
+              </p>
             </div>
 
             <div className="space-y-2">

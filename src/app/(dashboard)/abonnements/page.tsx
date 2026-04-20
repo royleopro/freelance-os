@@ -360,7 +360,7 @@ export default function AbonnementsPage() {
 
   const projectionData = useMemo(() => {
     const soldeDepart = parseFloat(getParam("solde_compte_pro")) || 0;
-    const fraisMensuels = parseFloat(getParam("frais_mensuels_fixes")) || 0;
+    const fraisMensuels = totalMensuel;
     const tauxUrssaf = parseFloat(getParam("taux_urssaf")) || 0.256;
     const salaire = parseFloat(salaireMensuel) || 0;
 
@@ -430,7 +430,7 @@ export default function AbonnementsPage() {
     }
 
     return months;
-  }, [transactions, provisions, parametres, salaireMensuel, inclureCA, getParam]);
+  }, [transactions, provisions, parametres, salaireMensuel, inclureCA, getParam, totalMensuel]);
 
   // Calcul du point de split pour le gradient (% de la hauteur où se trouve y=0)
   const gradientOffset = useMemo(() => {

@@ -302,6 +302,14 @@ export default function DashboardPage() {
     [transactions, clientProjetIds]
   );
 
+  const caEnAttente = useMemo(
+    () =>
+      transactions
+        .filter((t) => t.statut === "en_attente" && clientProjetIds.has(t.projet_id))
+        .reduce((sum, t) => sum + t.montant, 0),
+    [transactions, clientProjetIds]
+  );
+
   const caDevise = useMemo(
     () =>
       transactions
@@ -322,7 +330,7 @@ export default function DashboardPage() {
 
     const caPayeAnnee = allTransactions
       .filter((t) => {
-        if (t.statut !== "paye") return false;
+        if (t.statut !== "paye" && t.statut !== "en_attente") return false;
         const dp = t.date_paiement ?? t.date;
         return dp >= janFirst && clientProjetIds.has(t.projet_id);
       })
@@ -704,13 +712,13 @@ export default function DashboardPage() {
               CA {selectedYear === "all" ? "all time" : selectedYear}
             </CardDescription>
             <CardTitle className="text-xl">
-              {formatEuro(caEncaisse + caDevise)}
+              {formatEuro(caEncaisse + caEnAttente + caDevise)}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {selectedYear !== "all" && objectifAnnuel > 0 ? (
               (() => {
-                const totalCA = caEncaisse + caDevise;
+                const totalCA = caEncaisse + caEnAttente + caDevise;
                 const estDepasse = totalCA > objectifAnnuel;
                 if (estDepasse) {
                   const depassement = totalCA - objectifAnnuel;
@@ -746,6 +754,12 @@ export default function DashboardPage() {
                       </div>
                       <p className="text-xs text-[#767676]">
                         <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                        {caEnAttente > 0 && (
+                          <>
+                            {" + "}
+                            <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                          </>
+                        )}
                         {" / Objectif "}
                         {formatEuro(objectifAnnuel)} dépassé
                       </p>
@@ -758,20 +772,39 @@ export default function DashboardPage() {
                     </div>
                   );
                 }
+                const pctPaye = Math.min((caEncaisse / objectifAnnuel) * 100, 100);
+                const pctAttente = Math.min(
+                  (caEnAttente / objectifAnnuel) * 100,
+                  Math.max(100 - pctPaye, 0)
+                );
+                const pctSigne = Math.min(
+                  (caDevise / objectifAnnuel) * 100,
+                  Math.max(100 - pctPaye - pctAttente, 0)
+                );
                 return (
                   <div className="space-y-1.5">
                     <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
                       <div
                         className="h-full bg-brand-accent transition-all"
-                        style={{ width: `${Math.min((caEncaisse / objectifAnnuel) * 100, 100)}%` }}
+                        style={{ width: `${pctPaye}%` }}
+                      />
+                      <div
+                        className="h-full bg-brand-accent/60 transition-all"
+                        style={{ width: `${pctAttente}%` }}
                       />
                       <div
                         className="h-full bg-brand-accent/30 transition-all"
-                        style={{ width: `${Math.min((caDevise / objectifAnnuel) * 100, Math.max(100 - (caEncaisse / objectifAnnuel) * 100, 0))}%` }}
+                        style={{ width: `${pctSigne}%` }}
                       />
                     </div>
                     <p className="text-xs text-[#767676]">
                       <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                      {caEnAttente > 0 && (
+                        <>
+                          {" + "}
+                          <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                        </>
+                      )}
                       {" + "}
                       <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
                       {" / "}
@@ -781,36 +814,56 @@ export default function DashboardPage() {
                 );
               })()
             ) : selectedYear !== "all" ? (
-              <div className="space-y-1.5">
-                <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
-                  <div
-                    className="h-full bg-brand-accent transition-all"
-                    style={{
-                      width: `${caEncaisse + caDevise > 0 ? Math.min((caEncaisse / (caEncaisse + caDevise)) * 100, 100) : 0}%`,
-                    }}
-                  />
-                  <div
-                    className="h-full bg-brand-accent/30 transition-all"
-                    style={{
-                      width: `${caEncaisse + caDevise > 0 ? Math.min((caDevise / (caEncaisse + caDevise)) * 100, 100) : 0}%`,
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-[#767676]">
-                  <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
-                  {" + "}
-                  <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
-                </p>
-                <Link
-                  href="/objectifs"
-                  className="text-xs text-[#767676] hover:text-brand-accent transition underline-offset-2 hover:underline"
-                >
-                  Aucun objectif défini
-                </Link>
-              </div>
+              (() => {
+                const total = caEncaisse + caEnAttente + caDevise;
+                const pctPaye = total > 0 ? (caEncaisse / total) * 100 : 0;
+                const pctAttente = total > 0 ? (caEnAttente / total) * 100 : 0;
+                const pctSigne = total > 0 ? (caDevise / total) * 100 : 0;
+                return (
+                  <div className="space-y-1.5">
+                    <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
+                      <div
+                        className="h-full bg-brand-accent transition-all"
+                        style={{ width: `${pctPaye}%` }}
+                      />
+                      <div
+                        className="h-full bg-brand-accent/60 transition-all"
+                        style={{ width: `${pctAttente}%` }}
+                      />
+                      <div
+                        className="h-full bg-brand-accent/30 transition-all"
+                        style={{ width: `${pctSigne}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-[#767676]">
+                      <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                      {caEnAttente > 0 && (
+                        <>
+                          {" + "}
+                          <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                        </>
+                      )}
+                      {" + "}
+                      <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
+                    </p>
+                    <Link
+                      href="/objectifs"
+                      className="text-xs text-[#767676] hover:text-brand-accent transition underline-offset-2 hover:underline"
+                    >
+                      Aucun objectif défini
+                    </Link>
+                  </div>
+                );
+              })()
             ) : (
               <p className="text-xs text-[#767676]">
                 <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                {caEnAttente > 0 && (
+                  <>
+                    {" + "}
+                    <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                  </>
+                )}
                 {" + "}
                 <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
               </p>
@@ -839,7 +892,7 @@ export default function DashboardPage() {
                     {netReel ? formatEuro(netReel.montant) : "—"}
                   </p>
                   <p className="text-xs text-[#767676] mt-0.5">
-                    Moyenne sur {netReel?.mois ?? 0} mois (paye)
+                    Moyenne sur {netReel?.mois ?? 0} mois (paye + en attente)
                   </p>
                 </div>
 

@@ -82,7 +82,7 @@ export default function ObjectifsPage() {
         supabase
           .from("transactions_ca")
           .select("*")
-          .eq("statut", "paye")
+          .in("statut", ["paye", "en_attente"])
           .gte("date", `${selectedYear}-01-01`)
           .lte("date", `${selectedYear}-12-31`),
       ]);
