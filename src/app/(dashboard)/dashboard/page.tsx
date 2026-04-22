@@ -319,37 +319,103 @@ export default function DashboardPage() {
   );
 
   // ───── KPI: Net mensuel — réel + à venir ─────
-  const janFirst = `${CURRENT_YEAR}-01-01`;
   const coefNet = 1 - tauxUrssaf - tauxImpots;
+
+  // Période utilisée par les moyennes de salaire net, pilotée par le selecteur d'année.
+  // "all" → depuis novembre 2024 (premier mois d'activité traqué).
+  const netPeriod = useMemo(() => {
+    const now = new Date();
+    const firstOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Dernier jour du mois précédent (= fin des mois pleinement écoulés).
+    const lastPastDay = new Date(firstOfCurrentMonth.getTime() - 86_400_000);
+    const lastPastDayStr = lastPastDay.toISOString().split("T")[0];
+    const lastPastMonthIdx = lastPastDay.getMonth();
+    const lastPastYear = lastPastDay.getFullYear();
+
+    if (selectedYear === "all") {
+      const start = new Date(2024, 9, 1); // Oct 1 2024
+      const moisEcoules =
+        (firstOfCurrentMonth.getFullYear() - start.getFullYear()) * 12 +
+        (firstOfCurrentMonth.getMonth() - start.getMonth());
+      const rangeLabel =
+        moisEcoules > 0
+          ? `oct. 2024 → ${MOIS_NOMS[lastPastMonthIdx]} ${lastPastYear}`
+          : "—";
+      return {
+        startStr: "2024-10-01",
+        endFullStr: now.toISOString().split("T")[0],
+        endPastStr: lastPastDayStr,
+        moisEcoules,
+        label: "depuis oct. 2024",
+        rangeLabel,
+        isCurrent: false,
+      };
+    }
+    const year = parseInt(selectedYear);
+    const isFuture = year > now.getFullYear();
+    const isPast = year < now.getFullYear();
+    const isCurrent = year === now.getFullYear();
+
+    let moisEcoules: number;
+    let endPastStr: string;
+    let rangeLabel: string;
+    if (isFuture) {
+      moisEcoules = 0;
+      endPastStr = `${year}-01-01`;
+      rangeLabel = "—";
+    } else if (isPast) {
+      moisEcoules = 12;
+      endPastStr = `${year}-12-31`;
+      rangeLabel = `janv. → dec. ${year}`;
+    } else {
+      moisEcoules = now.getMonth();
+      endPastStr = moisEcoules === 0 ? `${year}-01-01` : lastPastDayStr;
+      rangeLabel =
+        moisEcoules === 0
+          ? "—"
+          : moisEcoules === 1
+          ? `janv. ${year}`
+          : `janv. → ${MOIS_NOMS[lastPastMonthIdx]} ${year}`;
+    }
+    return {
+      startStr: `${year}-01-01`,
+      endFullStr: `${year}-12-31`,
+      endPastStr,
+      moisEcoules,
+      label: String(year),
+      rangeLabel,
+      isCurrent,
+    };
+  }, [selectedYear]);
 
   const netReel = useMemo(() => {
     if (!hasTaux) return null;
-    const now = new Date();
-    const moisEcoules = now.getMonth(); // 0-indexed = mois complets écoulés (en avril → 3)
-    if (moisEcoules === 0) return null;
+    if (netPeriod.moisEcoules === 0) return null;
 
+    // Borne haute = dernier jour des mois pleinement écoulés
+    // (ex: en avril, on compte janvier → mars uniquement).
     const caPayeAnnee = allTransactions
       .filter((t) => {
         if (t.statut !== "paye" && t.statut !== "en_attente") return false;
         const dp = t.date_paiement ?? t.date;
-        return dp >= janFirst && clientProjetIds.has(t.projet_id);
+        return dp >= netPeriod.startStr && dp <= netPeriod.endPastStr && clientProjetIds.has(t.projet_id);
       })
       .reduce((sum, t) => sum + t.montant, 0);
 
     return {
-      montant: (caPayeAnnee / moisEcoules) * coefNet,
-      mois: moisEcoules,
+      montant: (caPayeAnnee / netPeriod.moisEcoules) * coefNet,
+      mois: netPeriod.moisEcoules,
     };
-  }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
+  }, [allTransactions, clientProjetIds, hasTaux, coefNet, netPeriod]);
 
   const netAVenir = useMemo(() => {
     if (!hasTaux) return null;
+    if (!netPeriod.isCurrent) return null;
 
-    // Transactions non-payées (signe + en_attente) de l'année en cours
     const txNonPayees = allTransactions.filter((t) => {
       if (t.statut === "paye") return false;
       const dp = t.date_paiement ?? t.date;
-      return dp >= janFirst && clientProjetIds.has(t.projet_id);
+      return dp >= netPeriod.startStr && dp <= netPeriod.endFullStr && clientProjetIds.has(t.projet_id);
     });
 
     if (txNonPayees.length === 0) return null;
@@ -358,16 +424,15 @@ export default function DashboardPage() {
     let dernierMois = 0;
     for (const t of txNonPayees) {
       const dp = t.date_paiement ?? t.date;
-      const m = new Date(dp).getMonth(); // 0-indexed
+      const m = new Date(dp).getMonth();
       if (m > dernierMois) dernierMois = m;
     }
 
-    // Toutes les transactions (payé + signe + en_attente) de jan → dernier mois
-    const nbMois = dernierMois + 1; // jan=0 → 1 mois, etc.
+    const nbMois = dernierMois + 1;
     const caTotal = allTransactions
       .filter((t) => {
         const dp = t.date_paiement ?? t.date;
-        return dp >= janFirst && clientProjetIds.has(t.projet_id);
+        return dp >= netPeriod.startStr && dp <= netPeriod.endFullStr && clientProjetIds.has(t.projet_id);
       })
       .reduce((sum, t) => sum + t.montant, 0);
 
@@ -376,21 +441,23 @@ export default function DashboardPage() {
       mois: nbMois,
       dernierMoisLabel: MOIS_NOMS[dernierMois],
     };
-  }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
+  }, [allTransactions, clientProjetIds, hasTaux, coefNet, netPeriod]);
 
   const netAnneeComplete = useMemo(() => {
     if (!hasTaux) return null;
+    if (selectedYear === "all") return null;
+
     const caTotalAnnee = allTransactions
       .filter((t) => {
         const dp = t.date_paiement ?? t.date;
-        return dp >= janFirst && clientProjetIds.has(t.projet_id);
+        return dp >= netPeriod.startStr && dp <= netPeriod.endFullStr && clientProjetIds.has(t.projet_id);
       })
       .reduce((sum, t) => sum + t.montant, 0);
 
     if (caTotalAnnee === 0) return null;
 
     return (caTotalAnnee * coefNet) / 12;
-  }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
+  }, [allTransactions, clientProjetIds, hasTaux, coefNet, netPeriod, selectedYear]);
 
   // ───── KPI: Jours signes (current year) ─────
   const devisSignesAnnee = useMemo(() => {
@@ -428,7 +495,54 @@ export default function DashboardPage() {
 
   // ───── Section 3: Chart data ─────
   const chartData = useMemo(() => {
-    const objectifMensuel = selectedYear !== "all" && objectifAnnuel > 0 ? objectifAnnuel / 12 : 0;
+    // All-time : série mensuelle d'octobre 2024 au mois en cours (label "Mois AA").
+    if (selectedYear === "all") {
+      const start = new Date(2024, 9, 1); // Oct 1 2024
+      const now = new Date();
+      const points: {
+        mois: string;
+        objectif: number;
+        paye: number;
+        en_attente: number;
+        urssaf: number;
+      }[] = [];
+      const cursor = new Date(start);
+      while (
+        cursor.getFullYear() < now.getFullYear() ||
+        (cursor.getFullYear() === now.getFullYear() &&
+          cursor.getMonth() <= now.getMonth())
+      ) {
+        points.push({
+          mois: `${MOIS_LABELS[cursor.getMonth()]} ${String(cursor.getFullYear()).slice(2)}`,
+          objectif: 0,
+          paye: 0,
+          en_attente: 0,
+          urssaf: 0,
+        });
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+
+      for (const t of transactions) {
+        if (!clientProjetIds.has(t.projet_id)) continue;
+        const d = new Date(t.date);
+        const idx =
+          (d.getFullYear() - start.getFullYear()) * 12 +
+          (d.getMonth() - start.getMonth());
+        if (idx < 0 || idx >= points.length) continue;
+        if (t.statut === "paye") points[idx].paye += t.montant;
+        else if (t.statut === "signe" || t.statut === "en_attente")
+          points[idx].en_attente += t.montant;
+      }
+
+      return points.map((p) => ({
+        ...p,
+        paye: Math.round(p.paye),
+        en_attente: Math.round(p.en_attente),
+        urssaf: hasTaux ? Math.round(p.paye * tauxUrssaf) : 0,
+      }));
+    }
+
+    const objectifMensuel = objectifAnnuel > 0 ? objectifAnnuel / 12 : 0;
     const payeParMois = new Array(12).fill(0);
     const attenteParMois = new Array(12).fill(0);
 
@@ -890,7 +1004,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardDescription className="flex items-center gap-1.5">
               <Euro className="size-3.5" />
-              Net mensuel moyen {CURRENT_YEAR}
+              Net mensuel moyen {netPeriod.label}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -906,7 +1020,7 @@ export default function DashboardPage() {
                     {netReel ? formatEuro(netReel.montant) : "—"}
                   </p>
                   <p className="text-xs text-[#767676] mt-0.5">
-                    Moyenne sur {netReel?.mois ?? 0} mois (paye + en attente)
+                    {netPeriod.rangeLabel} · {netReel?.mois ?? 0} mois (paye + en attente)
                   </p>
                 </div>
 
