@@ -383,22 +383,28 @@ export default function AbonnementsPage() {
       const moisNum = moisDate.getMonth();
       const annee = moisDate.getFullYear();
       const label = MOIS_LABELS[moisNum];
+      const isCurrentMonth = i === 0;
 
       const soldeDebut = soldeCourant;
 
-      // CA attendu : transactions avec date_paiement (ou date en fallback) dans ce mois
-      // Si toggle actif : inclut signé + en_attente + payé. Sinon : uniquement payé.
-      const statutsInclus = inclureCA
+      // Transactions du mois (date_paiement, sinon date)
+      const txDuMois = transactions.filter((tx) => {
+        const dp = tx.date_paiement ?? tx.date;
+        if (!dp) return false;
+        const d = new Date(dp);
+        return d.getMonth() === moisNum && d.getFullYear() === annee;
+      });
+
+      // CA attendu : le mois en cours exclut 'paye' (deja dans le solde Qonto).
+      // Les autres mois suivent le toggle inclureCA.
+      const baseStatuts = inclureCA
         ? ["signe", "en_attente", "paye"]
         : ["paye"];
-      const caAttendu = transactions
-        .filter((tx) => {
-          if (!statutsInclus.includes(tx.statut)) return false;
-          const dp = tx.date_paiement ?? tx.date;
-          if (!dp) return false;
-          const d = new Date(dp);
-          return d.getMonth() === moisNum && d.getFullYear() === annee;
-        })
+      const statutsCA = isCurrentMonth
+        ? baseStatuts.filter((s) => s !== "paye")
+        : baseStatuts;
+      const caAttendu = txDuMois
+        .filter((tx) => statutsCA.includes(tx.statut))
         .reduce((sum, tx) => sum + tx.montant, 0);
 
       // Provisions du mois
@@ -410,8 +416,9 @@ export default function AbonnementsPage() {
         })
         .reduce((sum, p) => sum + p.montant, 0);
 
-      // URSSAF = CA du mois × taux
-      const urssaf = caAttendu * tauxUrssaf;
+      // URSSAF : base sur toutes les transactions du mois (paye + signe + en_attente)
+      const caTotalMois = txDuMois.reduce((sum, tx) => sum + tx.montant, 0);
+      const urssaf = caTotalMois * tauxUrssaf;
 
       const soldeFin = soldeDebut + caAttendu - fraisMensuels - provisionsMonth - urssaf - salaire;
 

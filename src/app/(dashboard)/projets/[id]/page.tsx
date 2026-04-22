@@ -13,7 +13,7 @@ import type {
   Devis,
 } from "@/lib/types";
 import { getEtiquette } from "@/lib/etiquettes";
-import { computeHeuresParDevis } from "@/lib/heures-par-devis";
+import { computeHeuresParDevis, devisCapacityHeures } from "@/lib/heures-par-devis";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,7 +69,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { NouveauPaiementDialog } from "./nouveau-paiement-dialog";
-import { NouveauDevisDialog } from "./nouveau-devis-dialog";
+import { DevisDialog } from "./devis-dialog";
 import { ProjetDialog } from "../projet-dialog";
 import { GererPaiementsDialog } from "@/components/gerer-paiements-dialog";
 
@@ -160,6 +160,7 @@ export default function ProjetDetailPage() {
   const [paiementDialogOpen, setPaiementDialogOpen] = useState(false);
   const [paiementDevisId, setPaiementDevisId] = useState<string | null>(null);
   const [devisDialogOpen, setDevisDialogOpen] = useState(false);
+  const [editingDevis, setEditingDevis] = useState<Devis | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [paiementsDevis, setPaiementsDevis] = useState<Devis | null>(null);
   const [unlinkedQontoDevis, setUnlinkedQontoDevis] = useState<Devis[]>([]);
@@ -238,6 +239,37 @@ export default function ProjetDetailPage() {
     }
   }
 
+  async function handleCloturerDevis(id: string) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("devis")
+      .update({
+        statut_heures: "cloture",
+        date_cloture: new Date().toISOString().split("T")[0],
+      })
+      .eq("id", id);
+    if (error) {
+      toast.error("Erreur", { description: "Impossible de cloturer le devis." });
+    } else {
+      toast.success("Devis cloture");
+      fetchData();
+    }
+  }
+
+  async function handleReouvrirDevis(id: string) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("devis")
+      .update({ statut_heures: "en_cours", date_cloture: null })
+      .eq("id", id);
+    if (error) {
+      toast.error("Erreur", { description: "Impossible de reouvrir le devis." });
+    } else {
+      toast.success("Devis reouvert");
+      fetchData();
+    }
+  }
+
   async function handleLinkQontoDevis(devisId: string) {
     const supabase = createClient();
     const { error } = await supabase
@@ -303,7 +335,9 @@ export default function ProjetDetailPage() {
   const totalJoursSignes = devisList
     .filter((d) => d.statut === "signe")
     .reduce((sum, d) => sum + (d.jours_signes ?? 0), 0);
-  const totalHeuresSignees = totalJoursSignes * 8;
+  const totalHeuresSignees = devisList
+    .filter((d) => d.statut === "signe")
+    .reduce((sum, d) => sum + devisCapacityHeures(d), 0);
   const pctAvancement = totalHeuresSignees > 0 ? (heuresFacturables / totalHeuresSignees) * 100 : 0;
 
   // TJM basé sur le dernier devis signé
@@ -429,7 +463,7 @@ export default function ProjetDetailPage() {
 
   const config = statutConfig[projet.statut];
   const rentabiliteEurH =
-    totalHeures > 0 ? totalPaye / totalHeures : null;
+    totalHeures > 0 ? totalCA / totalHeures : null;
   const paiementStatus = paiementBadge(totalPaye, totalCA);
 
   return (
@@ -627,7 +661,7 @@ export default function ProjetDetailPage() {
                     Rentabilite reelle
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {formatEuro(totalPaye)} /{" "}
+                    {formatEuro(totalCA)} /{" "}
                     {totalHeures.toFixed(1)}h total ={" "}
                     <span className="font-medium text-foreground">
                       {formatEuro(rentabiliteEurH)}/h
@@ -834,9 +868,10 @@ export default function ProjetDetailPage() {
                   .filter((t) => t.statut === "paye")
                   .reduce((sum, t) => sum + t.montant, 0);
                 const devisJours = d.jours_signes ?? 0;
-                const devisHeuresSignees = devisJours * 8;
+                const devisHeuresSignees = devisCapacityHeures(d);
                 const devisHeuresAttribuees = heuresAttribueesParDevis[d.id] ?? 0;
                 const devisPct = devisHeuresSignees > 0 ? (devisHeuresAttribuees / devisHeuresSignees) * 100 : 0;
+                const devisIsClosed = d.statut_heures === "cloture";
                 return (
                   <div key={d.id} className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -877,6 +912,14 @@ export default function ProjetDetailPage() {
                             Refuse
                           </Badge>
                         )}
+                        {d.statut_heures === "cloture" && (
+                          <Badge
+                            variant="outline"
+                            className="bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+                          >
+                            Cloture{d.date_cloture ? ` le ${formatDate(d.date_cloture)}` : ""}
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <Button
@@ -898,6 +941,62 @@ export default function ProjetDetailPage() {
                           <Plus data-icon="inline-start" />
                           Nouveau paiement
                         </Button>
+                        {d.statut_heures === "en_cours" &&
+                          d.statut === "signe" &&
+                          devisJours > 0 && (
+                            <AlertDialog>
+                              <AlertDialogTrigger
+                                render={
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="border-red-500/40 bg-transparent text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                                  >
+                                    Cloturer ce devis
+                                  </Button>
+                                }
+                              />
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>
+                                    Cloturer ce devis ?
+                                  </AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Les heures restantes non consommees ne seront pas reportees.
+                                    {" "}
+                                    {devisHeuresAttribuees.toFixed(1)}h ont ete attribuees sur {devisHeuresSignees}h signees.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Annuler</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    onClick={() => handleCloturerDevis(d.id)}
+                                    className="bg-destructive text-white hover:bg-destructive/90"
+                                  >
+                                    Cloturer
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          )}
+                        {d.statut_heures === "cloture" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleReouvrirDevis(d.id)}
+                            className="text-muted-foreground"
+                          >
+                            Reouvrir
+                          </Button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setEditingDevis(d)}
+                          className="text-muted-foreground hover:text-foreground cursor-pointer p-1"
+                          aria-label="Modifier"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
                         <AlertDialog>
                           <AlertDialogTrigger className="text-muted-foreground hover:text-destructive cursor-pointer p-1">
                             <Trash2 className="size-3.5" />
@@ -1007,9 +1106,18 @@ export default function ProjetDetailPage() {
                             {devisPct.toFixed(0)}%
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {devisHeuresAttribuees.toFixed(1)}h / {devisHeuresSignees}h signees
-                        </p>
+                        {devisIsClosed ? (
+                          <Badge
+                            variant="outline"
+                            className="bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+                          >
+                            Cloture — {devisHeuresAttribuees.toFixed(1)}h / {devisHeuresSignees}h
+                          </Badge>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            {devisHeuresAttribuees.toFixed(1)}h / {devisHeuresSignees}h signees
+                          </p>
+                        )}
                       </div>
                     ) : d.statut === "signe" ? (
                       <p className="ml-4 text-xs text-amber-400">
@@ -1081,11 +1189,19 @@ export default function ProjetDetailPage() {
         </Card>
       )}
 
-      <NouveauDevisDialog
+      <DevisDialog
         projetId={projet.id}
         open={devisDialogOpen}
         onOpenChange={setDevisDialogOpen}
-        onCreated={fetchData}
+        onSaved={fetchData}
+      />
+
+      <DevisDialog
+        projetId={projet.id}
+        devis={editingDevis}
+        open={!!editingDevis}
+        onOpenChange={(open) => { if (!open) setEditingDevis(null); }}
+        onSaved={fetchData}
       />
       </>)}
 

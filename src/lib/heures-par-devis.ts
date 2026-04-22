@@ -1,11 +1,20 @@
 import type { Devis } from "@/lib/types";
 
+export function devisCapacityHeures(devis: Pick<Devis, "jours_signes" | "base_journee">): number {
+  const base = devis.base_journee ?? 7;
+  return (devis.jours_signes ?? 0) * base;
+}
+
 /**
  * Attribute billable sessions to devis in chronological order.
  *
- * Sessions are sorted by date ASC and attributed to devis sorted by
- * date_signature ASC (then created_at). Each devis receives hours
- * up to jours_signes × 8. Remaining hours overflow to the next devis.
+ * Sessions are sorted by date ASC. Devis are sorted by date_signature ASC
+ * (then created_at). Each devis receives hours up to jours_signes × base_journee.
+ *
+ * Un devis clôturé (statut_heures = 'cloture') :
+ *   - n'attribue que les sessions datées <= date_cloture, cappées à sa capacité
+ *   - tout surplus pré-clôture (capacité dépassée avant date_cloture) est perdu
+ *   - le devis suivant ne reçoit que les sessions datées > date_cloture
  *
  * Returns a map of devis id → attributed hours.
  */
@@ -14,12 +23,10 @@ export function computeHeuresParDevis(
   sessions: { date: string; duree: number; facturable: boolean; projet_id: string }[],
   projetId: string
 ): Record<string, number> {
-  // Only facturable sessions for this project, sorted chronologically
   const facturables = sessions
     .filter((s) => s.facturable && s.projet_id === projetId)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  // Sort devis by date_signature (nulls last), then created_at
   const sortedDevis = [...devisList]
     .filter((d) => d.projet_id === projetId)
     .sort((a, b) => {
@@ -34,36 +41,55 @@ export function computeHeuresParDevis(
   let sessionIndex = 0;
 
   for (const devis of sortedDevis) {
-    const capacity = (devis.jours_signes ?? 0) * 8;
-    if (capacity <= 0) continue; // skip devis without jours_signes
+    const capacity = devisCapacityHeures(devis);
+    if (capacity <= 0) continue;
+
+    const isClosed = devis.statut_heures === "cloture";
+    const dateCloture = devis.date_cloture;
 
     let filled = 0;
     while (sessionIndex < facturables.length && filled < capacity) {
-      const remaining = capacity - filled;
       const session = facturables[sessionIndex];
 
+      if (isClosed && dateCloture && session.date > dateCloture) {
+        break;
+      }
+
+      const remaining = capacity - filled;
       if (session.duree <= remaining) {
         filled += session.duree;
         sessionIndex++;
       } else {
-        // Partial: this session overflows to next devis
         filled += remaining;
-        // Reduce session duration for next devis
         facturables[sessionIndex] = { ...session, duree: session.duree - remaining };
         break;
       }
     }
     result[devis.id] = filled;
+
+    // Devis clôturé : tout surplus pré-clôture est perdu (non reporté sur le devis suivant).
+    if (isClosed && dateCloture) {
+      while (
+        sessionIndex < facturables.length &&
+        facturables[sessionIndex].date <= dateCloture
+      ) {
+        sessionIndex++;
+      }
+    }
   }
 
-  // Any remaining hours go to the last devis with capacity, or create overflow on the last one
-  if (sessionIndex < facturables.length && sortedDevis.length > 0) {
-    const lastDevis = sortedDevis[sortedDevis.length - 1];
-    let overflow = 0;
-    for (let i = sessionIndex; i < facturables.length; i++) {
-      overflow += facturables[i].duree;
+  // Heures restantes (toutes post-clôture si le dernier devis est clôturé) : au dernier devis ouvert.
+  if (sessionIndex < facturables.length) {
+    const lastOpenDevis = [...sortedDevis]
+      .reverse()
+      .find((d) => d.statut_heures !== "cloture" && (d.jours_signes ?? 0) > 0);
+    if (lastOpenDevis) {
+      let overflow = 0;
+      for (let i = sessionIndex; i < facturables.length; i++) {
+        overflow += facturables[i].duree;
+      }
+      result[lastOpenDevis.id] = (result[lastOpenDevis.id] ?? 0) + overflow;
     }
-    result[lastDevis.id] = (result[lastDevis.id] ?? 0) + overflow;
   }
 
   return result;

@@ -99,6 +99,7 @@ export default function DevisPage() {
     libelle: "",
     montant_total: "",
     jours_signes: "",
+    base_journee: "7",
     statut: "signe" as DevisStatut,
     date_signature: todayStr(),
     date_debut: "",
@@ -255,6 +256,21 @@ export default function DevisPage() {
     }
   }
 
+  async function updateBaseJournee(id: string, base: number) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("devis")
+      .update({ base_journee: base })
+      .eq("id", id);
+    if (error) {
+      toast.error("Erreur", { description: "Impossible de mettre a jour la base." });
+    } else {
+      setDevisList((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, base_journee: base } : d))
+      );
+    }
+  }
+
   // --- New devis ---
   async function handleDeleteDevis(id: string) {
     const supabase = createClient();
@@ -284,6 +300,7 @@ export default function DevisPage() {
       libelle: newForm.libelle.trim(),
       montant_total: parseFloat(newForm.montant_total),
       jours_signes: newForm.jours_signes ? parseFloat(newForm.jours_signes) : 0,
+      base_journee: parseInt(newForm.base_journee, 10),
       statut: newForm.statut,
       date_signature: newForm.statut === "signe" ? newForm.date_signature : null,
       date_debut: newForm.date_debut || null,
@@ -300,6 +317,7 @@ export default function DevisPage() {
         libelle: "",
         montant_total: "",
         jours_signes: "",
+        base_journee: "7",
         statut: "signe",
         date_signature: todayStr(),
         date_debut: "",
@@ -479,6 +497,7 @@ export default function DevisPage() {
                   <TableHead>Libelle</TableHead>
                   <TableHead className="text-right">Montant</TableHead>
                   <TableHead className="text-right">Jours</TableHead>
+                  <TableHead className="text-center">Base</TableHead>
                   <TableHead>Statut</TableHead>
                   <TableHead>Debut</TableHead>
                   <TableHead>Fin</TableHead>
@@ -565,6 +584,22 @@ export default function DevisPage() {
                       ) : (
                         <span>{d.jours_signes ?? 0}j</span>
                       )}
+                    </TableCell>
+
+                    {/* Base journee — select inline */}
+                    <TableCell className="text-center">
+                      <Select
+                        value={String(d.base_journee ?? 7)}
+                        onValueChange={(v) => { if (v) updateBaseJournee(d.id, parseInt(v, 10)); }}
+                      >
+                        <SelectTrigger className="h-7 w-16 mx-auto">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="7">7h</SelectItem>
+                          <SelectItem value="8">8h</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </TableCell>
 
                     {/* Statut — select inline */}
@@ -693,7 +728,7 @@ export default function DevisPage() {
                   <TableCell className="text-right font-bold">
                     {totalJoursSignes}j
                   </TableCell>
-                  <TableCell colSpan={6} />
+                  <TableCell colSpan={7} />
                 </TableRow>
               </TableFooter>
             </Table>
@@ -770,6 +805,26 @@ export default function DevisPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
+                <Label>Base journee</Label>
+                <div className="inline-flex w-full rounded-md border border-border p-0.5">
+                  {(["7", "8"] as const).map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => updateNewForm("base_journee", val)}
+                      className={
+                        "flex-1 rounded-sm px-3 py-1 text-sm transition-colors " +
+                        (newForm.base_journee === val
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-transparent text-muted-foreground hover:bg-muted")
+                      }
+                    >
+                      {val}h / jour
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
                 <Label>Statut</Label>
                 <Select
                   value={newForm.statut}
@@ -785,18 +840,19 @@ export default function DevisPage() {
                   </SelectContent>
                 </Select>
               </div>
-              {newForm.statut === "signe" && (
-                <div className="space-y-2">
-                  <Label htmlFor="new-date-sig">Date de signature</Label>
-                  <Input
-                    id="new-date-sig"
-                    type="date"
-                    value={newForm.date_signature}
-                    onChange={(e) => updateNewForm("date_signature", e.target.value)}
-                  />
-                </div>
-              )}
             </div>
+
+            {newForm.statut === "signe" && (
+              <div className="space-y-2">
+                <Label htmlFor="new-date-sig">Date de signature</Label>
+                <Input
+                  id="new-date-sig"
+                  type="date"
+                  value={newForm.date_signature}
+                  onChange={(e) => updateNewForm("date_signature", e.target.value)}
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -818,6 +874,31 @@ export default function DevisPage() {
                 />
               </div>
             </div>
+
+            {(() => {
+              const jours = parseFloat(newForm.jours_signes) || 0;
+              const base = parseInt(newForm.base_journee, 10) || 7;
+              const montant = parseFloat(newForm.montant_total) || 0;
+              const heuresSignees = jours * base;
+              const tjmHoraire = jours > 0 && base > 0 ? montant / jours / base : 0;
+              return (
+                <div className="rounded-md border border-border bg-muted/30 p-3 text-sm space-y-1.5">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Calculs
+                  </p>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Heures signees</span>
+                    <span className="font-medium">{heuresSignees || 0}h</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">TJM horaire</span>
+                    <span className="font-medium">
+                      {tjmHoraire > 0 ? `${tjmHoraire.toFixed(0)}€/h` : "—"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <DialogFooter>
               <DialogClose render={<Button type="button" variant="outline">Annuler</Button>} />

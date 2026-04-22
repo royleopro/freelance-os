@@ -51,6 +51,7 @@ export interface Projet {
 }
 
 export type DevisStatut = "en_cours" | "signe" | "refuse";
+export type DevisStatutHeures = "en_cours" | "cloture";
 
 export interface Devis {
   id: string;
@@ -65,6 +66,9 @@ export interface Devis {
   qonto_id: string | null;
   source: string;
   created_at: string;
+  base_journee: number;
+  statut_heures: DevisStatutHeures;
+  date_cloture: string | null;
 }
 
 export interface SessionHeure {

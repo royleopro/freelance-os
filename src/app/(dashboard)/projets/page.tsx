@@ -82,13 +82,13 @@ function formatEuro(n: number) {
   }).format(n);
 }
 
-function rentabiliteValue(paye: number, heures: number): number | null {
-  return heures > 0 ? paye / heures : null;
+function rentabiliteValue(montantCA: number, heures: number): number | null {
+  return heures > 0 ? montantCA / heures : null;
 }
 
-function rentabiliteLabel(paye: number, heures: number): string {
+function rentabiliteLabel(montantCA: number, heures: number): string {
   if (heures <= 0) return "—";
-  return formatEuro(paye / heures) + "/h";
+  return formatEuro(montantCA / heures) + "/h";
 }
 
 function PillToggle<T extends string>({
@@ -273,8 +273,8 @@ export default function ProjetsPage() {
           break;
         }
         case "rentabilite": {
-          const ra = rentabiliteValue(a.montant_paye, heuresParProjet[a.id] ?? 0) ?? -Infinity;
-          const rb = rentabiliteValue(b.montant_paye, heuresParProjet[b.id] ?? 0) ?? -Infinity;
+          const ra = rentabiliteValue(a.montant_total, heuresParProjet[a.id] ?? 0) ?? -Infinity;
+          const rb = rentabiliteValue(b.montant_total, heuresParProjet[b.id] ?? 0) ?? -Infinity;
           cmp = ra - rb;
           break;
         }
@@ -521,7 +521,7 @@ export default function ProjetsPage() {
                         </TableCell>
                         <TableCell className="text-right font-medium">
                           {isClient
-                            ? rentabiliteLabel(projet.montant_paye, heuresParProjet[projet.id] ?? 0)
+                            ? rentabiliteLabel(projet.montant_total, heuresParProjet[projet.id] ?? 0)
                             : naCell}
                         </TableCell>
                         <TableCell>

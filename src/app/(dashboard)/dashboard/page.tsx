@@ -378,6 +378,20 @@ export default function DashboardPage() {
     };
   }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
 
+  const netAnneeComplete = useMemo(() => {
+    if (!hasTaux) return null;
+    const caTotalAnnee = allTransactions
+      .filter((t) => {
+        const dp = t.date_paiement ?? t.date;
+        return dp >= janFirst && clientProjetIds.has(t.projet_id);
+      })
+      .reduce((sum, t) => sum + t.montant, 0);
+
+    if (caTotalAnnee === 0) return null;
+
+    return (caTotalAnnee * coefNet) / 12;
+  }, [allTransactions, clientProjetIds, hasTaux, coefNet, janFirst]);
+
   // ───── KPI: Jours signes (current year) ─────
   const devisSignesAnnee = useMemo(() => {
     const year = CURRENT_YEAR;
@@ -906,6 +920,21 @@ export default function DashboardPage() {
                       </p>
                       <p className="text-xs text-[#767676] mt-0.5">
                         Moyenne jan → {netAVenir.dernierMoisLabel} (paye + signe)
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* Divider + Net année complète (CA net / 12) */}
+                {netAnneeComplete !== null && (
+                  <>
+                    <div className="h-px bg-[rgba(255,255,255,0.06)]" />
+                    <div>
+                      <p className="text-lg font-bold text-brand-accent/70">
+                        {formatEuro(netAnneeComplete)}
+                      </p>
+                      <p className="text-xs text-[#767676] mt-0.5">
+                        Moyenne sur 12 mois (CA net / 12)
                       </p>
                     </div>
                   </>
