@@ -13,6 +13,7 @@ import type {
   Provision,
 } from "@/lib/types";
 import { getEtiquette } from "@/lib/etiquettes";
+import { computeHeuresParDevis, devisCapacityHeures } from "@/lib/heures-par-devis";
 import {
   Card,
   CardContent,
@@ -480,6 +481,44 @@ export default function DashboardPage() {
     const totalMontant = devisSignesAnnee.reduce((sum, d) => sum + (d.montant_total ?? 0), 0);
     return { valeur: Math.round(totalMontant / totalJours), nbDevis: devisSignesAnnee.length };
   }, [devisSignesAnnee]);
+
+  // ───── KPI: Jours restants à travailler (devis signés non clôturés) ─────
+  const joursRestantsInfo = useMemo(() => {
+    const byProjet = new Map<string, Devis[]>();
+    for (const d of allDevis) {
+      if (!d.projet_id) continue;
+      const arr = byProjet.get(d.projet_id) ?? [];
+      arr.push(d);
+      byProjet.set(d.projet_id, arr);
+    }
+
+    const sessionsInput = sessions.map((s) => ({
+      date: s.date,
+      duree: s.duree,
+      facturable: s.facturable,
+      projet_id: s.projet_id,
+    }));
+
+    let totalJours = 0;
+    let totalHeures = 0;
+    let nbDevisEnCours = 0;
+
+    for (const [projetId, devisDuProjet] of byProjet) {
+      const heuresAttribuees = computeHeuresParDevis(devisDuProjet, sessionsInput, projetId);
+      for (const d of devisDuProjet) {
+        if (d.statut_heures !== "en_cours") continue;
+        nbDevisEnCours++;
+        const capacity = devisCapacityHeures(d);
+        const attribuees = heuresAttribuees[d.id] ?? 0;
+        const heuresRestantes = Math.max(0, capacity - attribuees);
+        const base = d.base_journee ?? 7;
+        if (base > 0) totalJours += heuresRestantes / base;
+        totalHeures += heuresRestantes;
+      }
+    }
+
+    return { jours: totalJours, heures: totalHeures, nbDevisEnCours };
+  }, [allDevis, sessions]);
 
   // ───── KPI: Tresorerie ─────
   const todayDate = new Date().toISOString().split("T")[0];
@@ -1127,6 +1166,22 @@ export default function DashboardPage() {
                   Calcule sur {tjmMoyenPondere.nbDevis} devis signe{tjmMoyenPondere.nbDevis > 1 ? "s" : ""} — pondere par le nombre de jours
                 </TooltipContent>
               </Tooltip>
+            )}
+            {joursRestantsInfo.nbDevisEnCours > 0 && (
+              joursRestantsInfo.jours < 0.05 ? (
+                <p className="mt-1 text-xs font-medium" style={{ color: "#0ACF83" }}>
+                  Tout est realise ✓
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-xs font-medium" style={{ color: "#0ACF83" }}>
+                    Jours restants : {joursRestantsInfo.jours.toFixed(1)} j
+                  </p>
+                  <p className="text-[11px] text-[#767676]">
+                    soit {joursRestantsInfo.heures.toFixed(0)}h a facturer
+                  </p>
+                </>
+              )
             )}
           </CardContent>
         </Card>
