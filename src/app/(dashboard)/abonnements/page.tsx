@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CreditCard, Plus, Trash2, AlertTriangle, TrendingUp } from "lucide-react";
+import { CreditCard, Plus, Trash2, AlertTriangle, TrendingUp, RefreshCw } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -101,6 +101,7 @@ interface ProjectionPoint {
   urssaf: number;
   salaire: number;
   soldeFin: number;
+  isCurrentMonth?: boolean;
 }
 
 function ProjectionTooltip({
@@ -140,7 +141,9 @@ function ProjectionTooltip({
         )}
         {d.urssaf > 0 && (
           <div className="flex justify-between gap-4">
-            <span className="text-[#767676]">URSSAF</span>
+            <span className="text-[#767676]">
+              {d.isCurrentMonth ? "URSSAF provisionnee" : "URSSAF"}
+            </span>
             <span className="text-[#EF4444]">-{formatEuroCompact(d.urssaf)}</span>
           </div>
         )}
@@ -189,7 +192,11 @@ export default function AbonnementsPage() {
   const [transactions, setTransactions] = useState<TransactionCA[]>([]);
   const [parametres, setParametres] = useState<Parametre[]>([]);
   const [salaireMensuel, setSalaireMensuel] = useState<string>("");
-  const [inclureCA, setInclureCA] = useState(true);
+  const [inclureCA, setInclureCA] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<
+    { type: "success" | "error"; text: string } | null
+  >(null);
 
   const supabase = createClient();
 
@@ -330,6 +337,47 @@ export default function AbonnementsPage() {
     setProvisions((prev) => prev.filter((p) => p.id !== id));
   }
 
+  // ═══════ Sync Qonto (depuis la card Projection) ═══════
+
+  async function handleSyncQonto() {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/qonto/sync", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setSyncMessage({
+          type: "error",
+          text: data?.error ?? "Erreur de synchronisation",
+        });
+        return;
+      }
+      // Le solde et les transactions sont rafraichis depuis Supabase ; calculerProjection
+      // se recalcule automatiquement via les useMemo sur transactions/parametres.
+      await fetchData();
+      const solde =
+        typeof data.solde?.solde_euros === "number"
+          ? data.solde.solde_euros
+          : null;
+      const dateLabel = new Date().toLocaleDateString("fr-FR", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+      setSyncMessage({
+        type: "success",
+        text:
+          solde != null
+            ? `Solde mis a jour — ${formatEuro(solde)} au ${dateLabel}`
+            : `Synchronisation reussie au ${dateLabel}`,
+      });
+    } catch {
+      setSyncMessage({ type: "error", text: "Erreur reseau" });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const totalProvisions = provisions.reduce((sum, p) => sum + p.montant, 0);
 
   const totalMensuel = abonnements.reduce((sum, a) => sum + coutMensuel(a), 0);
@@ -357,87 +405,228 @@ export default function AbonnementsPage() {
   );
 
   const MOIS_LABELS = ["Jan", "Fev", "Mar", "Avr", "Mai", "Jun", "Jul", "Aou", "Sep", "Oct", "Nov", "Dec"];
+  const MOIS_FULL = [
+    "janvier",
+    "fevrier",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "aout",
+    "septembre",
+    "octobre",
+    "novembre",
+    "decembre",
+  ];
+  const PROJECTION_HORIZON = 6;
+  const CHART_HORIZON = 12;
 
-  const projectionData = useMemo(() => {
-    const soldeDepart = parseFloat(getParam("solde_compte_pro")) || 0;
-    const fraisMensuels = totalMensuel;
-    const tauxUrssaf = parseFloat(getParam("taux_urssaf")) || 0.256;
-    const salaire = parseFloat(salaireMensuel) || 0;
+  // Fonction unique : calcule la projection mois par mois.
+  // - point 0 = fin du mois en cours (sans salaire deduit, mois traite comme deja consomme)
+  // - points 1..horizon = mois+1 ... mois+horizon (salaire deduit chaque mois)
+  // Cette meme fonction sert a (a) generer les points du graphique et (b) deriver le salaire max viable.
+  const calculerProjection = useCallback(
+    (salaire: number, horizon: number): ProjectionPoint[] => {
+      const soldeDepart = parseFloat(getParam("solde_compte_pro")) || 0;
+      const fraisMensuels = totalMensuel;
+      const tauxUrssaf = parseFloat(getParam("taux_urssaf")) || 0.256;
 
-    const now = new Date();
-    const months: {
-      label: string;
-      soldeDebut: number;
-      caAttendu: number;
-      frais: number;
-      provisionsMonth: number;
-      urssaf: number;
-      salaire: number;
-      soldeFin: number;
-    }[] = [];
+      const now = new Date();
+      const months: ProjectionPoint[] = [];
 
-    let soldeCourant = soldeDepart;
+      // ─── Point 0 : fin du mois en cours ───
+      const moisCourantNum = now.getMonth();
+      const anneeCourante = now.getFullYear();
 
-    for (let i = 0; i < 12; i++) {
-      const moisDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const moisNum = moisDate.getMonth();
-      const annee = moisDate.getFullYear();
-      const label = MOIS_LABELS[moisNum];
-      const isCurrentMonth = i === 0;
-
-      const soldeDebut = soldeCourant;
-
-      // Transactions du mois (date_paiement, sinon date)
-      const txDuMois = transactions.filter((tx) => {
+      const txCourantes = transactions.filter((tx) => {
         const dp = tx.date_paiement ?? tx.date;
         if (!dp) return false;
         const d = new Date(dp);
-        return d.getMonth() === moisNum && d.getFullYear() === annee;
+        return d.getMonth() === moisCourantNum && d.getFullYear() === anneeCourante;
       });
 
-      // CA attendu : le mois en cours exclut 'paye' (deja dans le solde Qonto).
-      // Les autres mois suivent le toggle inclureCA.
-      const baseStatuts = inclureCA
-        ? ["signe", "en_attente", "paye"]
-        : ["paye"];
-      const statutsCA = isCurrentMonth
-        ? baseStatuts.filter((s) => s !== "paye")
-        : baseStatuts;
-      const caAttendu = txDuMois
-        .filter((tx) => statutsCA.includes(tx.statut))
+      const statutsCAcourant = inclureCA ? ["signe", "en_attente"] : [];
+      const caCourant = txCourantes
+        .filter((tx) => statutsCAcourant.includes(tx.statut))
         .reduce((sum, tx) => sum + tx.montant, 0);
 
-      // Provisions du mois
-      const provisionsMonth = provisions
+      // Le CA paye du mois est deja dans Qonto cote inflow, mais l'URSSAF
+      // dessus n'a pas encore ete prelevee : on la provisionne ici.
+      const cazPayeCourant = txCourantes
+        .filter((tx) => tx.statut === "paye")
+        .reduce((sum, tx) => sum + tx.montant, 0);
+
+      const provisionsCourant = provisions
         .filter((p) => {
           if (!p.date_prevue) return false;
           const d = new Date(p.date_prevue);
-          return d.getMonth() === moisNum && d.getFullYear() === annee;
+          return d.getMonth() === moisCourantNum && d.getFullYear() === anneeCourante;
         })
         .reduce((sum, p) => sum + p.montant, 0);
 
-      // URSSAF : base sur toutes les transactions du mois (paye + signe + en_attente)
-      const caTotalMois = txDuMois.reduce((sum, tx) => sum + tx.montant, 0);
-      const urssaf = caTotalMois * tauxUrssaf;
+      // URSSAF provisionnee : sur le paye du mois (toujours) + signe/en_attente si toggle ON.
+      const urssafCourant = (cazPayeCourant + caCourant) * tauxUrssaf;
 
-      const soldeFin = soldeDebut + caAttendu - fraisMensuels - provisionsMonth - urssaf - salaire;
+      const soldeFinCourant =
+        soldeDepart - fraisMensuels - provisionsCourant - urssafCourant + caCourant;
 
       months.push({
-        label,
-        soldeDebut,
-        caAttendu,
+        label: `Fin ${MOIS_LABELS[moisCourantNum]}`,
+        soldeDebut: soldeDepart,
+        caAttendu: caCourant,
         frais: fraisMensuels,
-        provisionsMonth,
-        urssaf,
-        salaire,
-        soldeFin,
+        provisionsMonth: provisionsCourant,
+        urssaf: urssafCourant,
+        salaire: 0,
+        soldeFin: soldeFinCourant,
+        isCurrentMonth: true,
       });
 
-      soldeCourant = soldeFin;
-    }
+      let soldeCourant = soldeFinCourant;
 
-    return months;
-  }, [transactions, provisions, parametres, salaireMensuel, inclureCA, getParam, totalMensuel]);
+      // ─── Points 1..horizon : mois suivants (salaire deduit) ───
+      for (let i = 1; i <= horizon; i++) {
+        const moisDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        const moisNum = moisDate.getMonth();
+        const annee = moisDate.getFullYear();
+        const label = MOIS_LABELS[moisNum];
+
+        const soldeDebut = soldeCourant;
+
+        const txDuMois = transactions.filter((tx) => {
+          const dp = tx.date_paiement ?? tx.date;
+          if (!dp) return false;
+          const d = new Date(dp);
+          return d.getMonth() === moisNum && d.getFullYear() === annee;
+        });
+
+        const statutsCA = inclureCA
+          ? ["signe", "en_attente", "paye"]
+          : ["paye"];
+        const caAttendu = txDuMois
+          .filter((tx) => statutsCA.includes(tx.statut))
+          .reduce((sum, tx) => sum + tx.montant, 0);
+
+        const provisionsMonth = provisions
+          .filter((p) => {
+            if (!p.date_prevue) return false;
+            const d = new Date(p.date_prevue);
+            return d.getMonth() === moisNum && d.getFullYear() === annee;
+          })
+          .reduce((sum, p) => sum + p.montant, 0);
+
+        // URSSAF calculee uniquement sur le CA effectivement compte (toggle-aware).
+        const urssaf = caAttendu * tauxUrssaf;
+
+        const soldeFin =
+          soldeDebut + caAttendu - fraisMensuels - provisionsMonth - urssaf - salaire;
+
+        months.push({
+          label,
+          soldeDebut,
+          caAttendu,
+          frais: fraisMensuels,
+          provisionsMonth,
+          urssaf,
+          salaire,
+          soldeFin,
+        });
+
+        soldeCourant = soldeFin;
+      }
+
+      return months;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [transactions, provisions, parametres, getParam, totalMensuel, inclureCA]
+  );
+
+  const salaireSimuleNum = parseFloat(salaireMensuel) || 0;
+
+  // Graphique : 12 mois glissants (point 0 + mois+1..mois+12).
+  const projectionData = useMemo(
+    () => calculerProjection(salaireSimuleNum, CHART_HORIZON),
+    [calculerProjection, salaireSimuleNum]
+  );
+
+  // Salaire max viable : on rejoue la projection sur 6 mois avec salaire=0,
+  // puis on divise le solde a mois+6 par 6. Garantit que si on saisit ce montant
+  // dans l'input, le point mois+6 du graphique vaudra exactement 0.
+  const salaireMaxViable = useMemo(() => {
+    const proj = calculerProjection(0, PROJECTION_HORIZON);
+    const soldeFinMois6 = proj[proj.length - 1]?.soldeFin ?? 0;
+    return soldeFinMois6 / PROJECTION_HORIZON;
+  }, [calculerProjection]);
+
+  const moisFinLabel = useMemo(() => {
+    const now = new Date();
+    const d = new Date(now.getFullYear(), now.getMonth() + PROJECTION_HORIZON, 1);
+    return `${MOIS_FULL[d.getMonth()]} ${d.getFullYear()}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Objectif de signature : combien de CA il reste a signer pour les mois+7 a mois+12.
+  // Si l'input salaire est vide, on retombe sur le salaire max viable (clamp a 0) pour avoir un objectif coherent.
+  const objectifSignature = useMemo(() => {
+    const fraisMensuels = totalMensuel;
+    const tauxUrssaf = parseFloat(getParam("taux_urssaf")) || 0.256;
+    const salaireInput = parseFloat(salaireMensuel) || 0;
+    const salaire =
+      salaireInput > 0 ? salaireInput : Math.max(0, salaireMaxViable);
+
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth() + 7, 1);
+    const endDate = new Date(
+      now.getFullYear(),
+      now.getMonth() + 13,
+      0,
+      23,
+      59,
+      59
+    );
+
+    const caDejaPrevu = inclureCA
+      ? transactions
+          .filter((tx) => {
+            if (tx.statut !== "signe" && tx.statut !== "en_attente") return false;
+            const dp = tx.date_paiement ?? tx.date;
+            if (!dp) return false;
+            const d = new Date(dp);
+            return d >= startDate && d <= endDate;
+          })
+          .reduce((sum, tx) => sum + tx.montant, 0)
+      : 0;
+
+    // CA brut a generer pour couvrir salaire + frais nets sur 6 mois (URSSAF compris).
+    const besoinsNets = salaire * 6 + fraisMensuels * 6;
+    const caTotalNecessaire =
+      tauxUrssaf < 1 ? besoinsNets / (1 - tauxUrssaf) : besoinsNets;
+
+    const caASigner = Math.max(0, caTotalNecessaire - caDejaPrevu);
+
+    return { caASigner, caDejaPrevu, salaire };
+  }, [
+    transactions,
+    parametres,
+    salaireMensuel,
+    salaireMaxViable,
+    getParam,
+    totalMensuel,
+    inclureCA,
+  ]);
+
+  // Solde projete a 6 mois (utilise pour l'avertissement de salaire). Index PROJECTION_HORIZON = mois+6.
+  const soldeFinProjection = projectionData[PROJECTION_HORIZON]?.soldeFin ?? 0;
+  const tresorerieInsuffisante = salaireMaxViable <= 0;
+  const salaireDepasse =
+    !tresorerieInsuffisante &&
+    salaireSimuleNum > 0 &&
+    salaireSimuleNum > salaireMaxViable;
+  const salaireDansLeBudget =
+    !tresorerieInsuffisante &&
+    salaireSimuleNum > 0 &&
+    salaireSimuleNum <= salaireMaxViable;
 
   // Calcul du point de split pour le gradient (% de la hauteur où se trouve y=0)
   const gradientOffset = useMemo(() => {
@@ -775,16 +964,40 @@ export default function AbonnementsPage() {
       {/* Projection de trésorerie */}
       <Card className="bg-[#0F0F0F] border-[rgba(255,255,255,0.06)]">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="size-4" />
                 Projection de tresorerie
               </CardTitle>
               <CardDescription>
-                Evolution estimee sur 12 mois
+                Fin du mois en cours puis 12 mois glissants
               </CardDescription>
+              {syncMessage && (
+                <p
+                  className={`mt-1.5 text-[11px] ${
+                    syncMessage.type === "success"
+                      ? "text-[#0ACF83]"
+                      : "text-[#EF4444]"
+                  }`}
+                >
+                  {syncMessage.text}
+                </p>
+              )}
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleSyncQonto}
+              disabled={syncing}
+              className="h-8 gap-1.5 px-2 text-xs text-[#767676] hover:text-foreground"
+            >
+              <RefreshCw
+                className={`size-3.5 ${syncing ? "animate-spin" : ""}`}
+              />
+              Sync Qonto
+            </Button>
           </div>
           <div className="mt-3 flex flex-wrap items-end gap-6">
             <div>
@@ -805,6 +1018,11 @@ export default function AbonnementsPage() {
                   €
                 </span>
               </div>
+              {salaireDepasse && (
+                <p className="mt-1.5 text-[11px] text-[#EF9F27] max-w-xs leading-snug">
+                  Ce salaire depasse le maximum viable — tu seras a {formatEuroCompact(soldeFinProjection)} dans 6 mois
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 pb-0.5">
               <Switch
@@ -812,12 +1030,80 @@ export default function AbonnementsPage() {
                 onCheckedChange={(v: boolean) => setInclureCA(v)}
               />
               <label className="text-xs text-[#767676]">
-                Inclure CA signe / en attente
+                Inclure les paiements signes et en attente
               </label>
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            {/* Salaire max viable sur 6 mois */}
+            <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0A0A0A] px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wide text-[#767676]">
+                Salaire max viable sur 6 mois
+              </div>
+              {tresorerieInsuffisante ? (
+                <div className="mt-1 text-lg font-semibold text-[#EF4444]">
+                  Attention : tresorerie insuffisante
+                </div>
+              ) : (
+                <>
+                  <div
+                    className={`mt-0.5 text-3xl font-bold leading-none ${
+                      salaireDepasse
+                        ? "text-[#EF9F27]"
+                        : salaireDansLeBudget
+                          ? "text-[#0ACF83]"
+                          : "text-white"
+                    }`}
+                  >
+                    {formatEuroCompact(salaireMaxViable)}
+                    <span className="ml-1 text-base font-medium text-[#767676]">
+                      /mois
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#767676]">
+                    Pour arriver a 0 € en {moisFinLabel}
+                  </div>
+                  <div
+                    className={`mt-0.5 text-[11px] ${
+                      inclureCA ? "text-[#0ACF83]" : "text-[#767676]"
+                    }`}
+                  >
+                    {inclureCA
+                      ? "Paiements signes inclus"
+                      : "Sans les paiements a venir"}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Objectif de signature : CA a signer pour mois+7 -> mois+12 */}
+            <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#0A0A0A] px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wide text-[#767676]">
+                A signer d&apos;ici 6 mois
+              </div>
+              {objectifSignature.caASigner === 0 ? (
+                <div className="mt-1 text-2xl font-bold leading-none text-[#0ACF83]">
+                  Couvert ✓
+                </div>
+              ) : (
+                <>
+                  <div className="mt-0.5 text-3xl font-bold leading-none text-white">
+                    {formatEuroCompact(objectifSignature.caASigner)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#767676]">
+                    Pour maintenir {formatEuroCompact(objectifSignature.salaire)}/mois sur les 6 mois suivants
+                  </div>
+                </>
+              )}
+              {objectifSignature.caDejaPrevu > 0 && (
+                <div className="mt-1 text-[11px] text-[#0ACF83]">
+                  {formatEuroCompact(objectifSignature.caDejaPrevu)} deja signes
+                </div>
+              )}
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart data={projectionData} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
               <defs>
@@ -839,7 +1125,36 @@ export default function AbonnementsPage() {
               />
               <XAxis
                 dataKey="label"
-                tick={{ fill: "#767676", fontSize: 12 }}
+                tick={(props) => {
+                  const {
+                    x,
+                    y,
+                    payload,
+                    index,
+                  } = props as {
+                    x?: number | string;
+                    y?: number | string;
+                    payload?: { value: string; index?: number };
+                    index?: number;
+                  };
+                  if (x == null || y == null || !payload) return <></>;
+                  const i = index ?? payload.index ?? 0;
+                  const isCurrent = projectionData[i]?.isCurrentMonth;
+                  const xn = typeof x === "string" ? parseFloat(x) : x;
+                  const yn = typeof y === "string" ? parseFloat(y) : y;
+                  return (
+                    <text
+                      x={xn}
+                      y={yn + 14}
+                      textAnchor="middle"
+                      fill={isCurrent ? "#5A5A5A" : "#767676"}
+                      fontSize={12}
+                      fontStyle={isCurrent ? "italic" : "normal"}
+                    >
+                      {payload.value}
+                    </text>
+                  );
+                }}
                 axisLine={false}
                 tickLine={false}
               />
@@ -861,9 +1176,13 @@ export default function AbonnementsPage() {
                 strokeWidth={2}
                 fill="url(#projFillGradient)"
                 dot={(props) => {
-                  const { cx, cy, payload, index } = props as { cx?: number; cy?: number; payload?: { soldeFin: number }; index?: number };
+                  const { cx, cy, payload, index } = props as { cx?: number; cy?: number; payload?: { soldeFin: number; isCurrentMonth?: boolean }; index?: number };
                   if (cx == null || cy == null) return <></>;
-                  const color = (payload?.soldeFin ?? 0) >= 0 ? "#0ACF83" : "#EF4444";
+                  const color = payload?.isCurrentMonth
+                    ? "#767676"
+                    : (payload?.soldeFin ?? 0) >= 0
+                      ? "#0ACF83"
+                      : "#EF4444";
                   return (
                     <circle
                       key={index}
@@ -877,9 +1196,13 @@ export default function AbonnementsPage() {
                   );
                 }}
                 activeDot={(props) => {
-                  const { cx, cy, payload } = props as { cx?: number; cy?: number; payload?: { soldeFin: number } };
+                  const { cx, cy, payload } = props as { cx?: number; cy?: number; payload?: { soldeFin: number; isCurrentMonth?: boolean } };
                   if (cx == null || cy == null) return <></>;
-                  const color = (payload?.soldeFin ?? 0) >= 0 ? "#0ACF83" : "#EF4444";
+                  const color = payload?.isCurrentMonth
+                    ? "#767676"
+                    : (payload?.soldeFin ?? 0) >= 0
+                      ? "#0ACF83"
+                      : "#EF4444";
                   return (
                     <circle
                       cx={cx}
