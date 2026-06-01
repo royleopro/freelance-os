@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { Amount } from "@/components/amount";
+import { usePrivacyMode } from "@/lib/privacy-context";
 import { createClient } from "@/lib/supabase/client";
 import type { Abonnement, Provision, TransactionCA, Parametre } from "@/lib/types";
 import {
@@ -81,12 +83,13 @@ function DonutTooltip({
   active?: boolean;
   payload?: { payload: { name: string; value: number; percent: number } }[];
 }) {
+  const { isHidden } = usePrivacyMode();
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
   return (
     <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#1A1A1A] px-3 py-2 text-sm shadow-md">
       <p className="font-medium text-white mb-0.5">{d.name}</p>
-      <p className="text-[#0ACF83]">{formatEuro(d.value)}</p>
+      <p className={`text-[#0ACF83]${isHidden ? " blur-sm select-none" : ""}`}>{formatEuro(d.value)}</p>
       <p className="text-[#767676]">{(d.percent * 100).toFixed(0)}%</p>
     </div>
   );
@@ -111,32 +114,36 @@ function ProjectionTooltip({
   active?: boolean;
   payload?: { payload: ProjectionPoint }[];
 }) {
+  const { isHidden } = usePrivacyMode();
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
+  const fmt = (n: number) => (
+    <span className={isHidden ? "blur-sm select-none" : ""}>{formatEuroCompact(n)}</span>
+  );
   return (
     <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#1A1A1A] px-3 py-2.5 text-sm shadow-md min-w-[180px]">
       <p className="font-medium text-white mb-1.5">{d.label}</p>
       <div className="space-y-0.5 text-xs">
         <div className="flex justify-between gap-4">
           <span className="text-[#767676]">Solde debut</span>
-          <span className="text-white">{formatEuroCompact(d.soldeDebut)}</span>
+          <span className="text-white">{fmt(d.soldeDebut)}</span>
         </div>
         {d.caAttendu > 0 && (
           <div className="flex justify-between gap-4">
             <span className="text-[#767676]">CA attendu</span>
-            <span className="text-[#0ACF83]">+{formatEuroCompact(d.caAttendu)}</span>
+            <span className="text-[#0ACF83]">+{fmt(d.caAttendu)}</span>
           </div>
         )}
         {d.frais > 0 && (
           <div className="flex justify-between gap-4">
             <span className="text-[#767676]">Frais mensuels</span>
-            <span className="text-[#EF4444]">-{formatEuroCompact(d.frais)}</span>
+            <span className="text-[#EF4444]">-{fmt(d.frais)}</span>
           </div>
         )}
         {d.provisionsMonth > 0 && (
           <div className="flex justify-between gap-4">
             <span className="text-[#767676]">Provisions</span>
-            <span className="text-orange-400">-{formatEuroCompact(d.provisionsMonth)}</span>
+            <span className="text-orange-400">-{fmt(d.provisionsMonth)}</span>
           </div>
         )}
         {d.urssaf > 0 && (
@@ -144,19 +151,19 @@ function ProjectionTooltip({
             <span className="text-[#767676]">
               {d.isCurrentMonth ? "URSSAF provisionnee" : "URSSAF"}
             </span>
-            <span className="text-[#EF4444]">-{formatEuroCompact(d.urssaf)}</span>
+            <span className="text-[#EF4444]">-{fmt(d.urssaf)}</span>
           </div>
         )}
         {d.salaire > 0 && (
           <div className="flex justify-between gap-4">
             <span className="text-[#767676]">Salaire simule</span>
-            <span className="text-[#EF4444]">-{formatEuroCompact(d.salaire)}</span>
+            <span className="text-[#EF4444]">-{fmt(d.salaire)}</span>
           </div>
         )}
         <div className="border-t border-[rgba(255,255,255,0.06)] mt-1.5 pt-1.5 flex justify-between gap-4">
           <span className="text-[#767676] font-medium">Solde fin</span>
           <span className={`font-bold ${d.soldeFin >= 0 ? "text-[#0ACF83]" : "text-[#EF4444]"}`}>
-            {formatEuroCompact(d.soldeFin)}
+            {fmt(d.soldeFin)}
           </span>
         </div>
       </div>
@@ -656,7 +663,7 @@ export default function AbonnementsPage() {
       <div>
         <h1 className="text-2xl font-bold">Tresorerie</h1>
         <p className="text-sm text-muted-foreground">
-          Frais mensuels fixes : <span className="font-medium text-foreground">{formatEuro(totalMensuel)}</span>
+          Frais mensuels fixes : <Amount value={totalMensuel} className="font-medium text-foreground" />
         </p>
       </div>
 
@@ -745,7 +752,7 @@ export default function AbonnementsPage() {
                         </Select>
                       </TableCell>
                       <TableCell className="text-right text-muted-foreground">
-                        {abo.actif ? formatEuro(coutMensuel(abo)) : "—"}
+                        {abo.actif ? <Amount value={coutMensuel(abo)} /> : "—"}
                       </TableCell>
                       <TableCell>
                         <Select
@@ -826,7 +833,7 @@ export default function AbonnementsPage() {
                       />
                       <span className="text-muted-foreground">{d.name}</span>
                     </div>
-                    <span className="font-medium">{formatEuro(d.value)}</span>
+                    <Amount value={d.value} className="font-medium" />
                   </div>
                 ))}
               </div>
@@ -848,9 +855,7 @@ export default function AbonnementsPage() {
                 Provisions et depenses prevues
               </CardDescription>
             </div>
-            <span className="text-xl font-bold text-red-400">
-              {formatEuro(totalProvisions)}
-            </span>
+            <Amount value={totalProvisions} className="text-xl font-bold text-red-400" />
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -1020,7 +1025,7 @@ export default function AbonnementsPage() {
               </div>
               {salaireDepasse && (
                 <p className="mt-1.5 text-[11px] text-[#EF9F27] max-w-xs leading-snug">
-                  Ce salaire depasse le maximum viable — tu seras a {formatEuroCompact(soldeFinProjection)} dans 6 mois
+                  Ce salaire depasse le maximum viable — tu seras a <Amount value={soldeFinProjection} compact /> dans 6 mois
                 </p>
               )}
             </div>
@@ -1057,7 +1062,7 @@ export default function AbonnementsPage() {
                           : "text-white"
                     }`}
                   >
-                    {formatEuroCompact(salaireMaxViable)}
+                    <Amount value={salaireMaxViable} compact />
                     <span className="ml-1 text-base font-medium text-[#767676]">
                       /mois
                     </span>
@@ -1090,16 +1095,16 @@ export default function AbonnementsPage() {
               ) : (
                 <>
                   <div className="mt-0.5 text-3xl font-bold leading-none text-white">
-                    {formatEuroCompact(objectifSignature.caASigner)}
+                    <Amount value={objectifSignature.caASigner} compact />
                   </div>
                   <div className="mt-1 text-[11px] text-[#767676]">
-                    Pour maintenir {formatEuroCompact(objectifSignature.salaire)}/mois sur les 6 mois suivants
+                    Pour maintenir <Amount value={objectifSignature.salaire} compact />/mois sur les 6 mois suivants
                   </div>
                 </>
               )}
               {objectifSignature.caDejaPrevu > 0 && (
                 <div className="mt-1 text-[11px] text-[#0ACF83]">
-                  {formatEuroCompact(objectifSignature.caDejaPrevu)} deja signes
+                  <Amount value={objectifSignature.caDejaPrevu} compact /> deja signes
                 </div>
               )}
             </div>

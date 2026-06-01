@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { usePrivacyMode } from "@/lib/privacy-context";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 
 interface ProjetCA {
@@ -30,18 +31,20 @@ function CustomTooltip({
   active?: boolean;
   payload?: { payload: ProjetCA & { percent: number } }[];
 }) {
+  const { isHidden } = usePrivacyMode();
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
   return (
     <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#1A1A1A] px-3 py-2 text-sm shadow-md">
       <p className="font-medium text-white mb-0.5">{d.nom}</p>
-      <p className="text-[#0ACF83]">{formatEuro(d.montant)}</p>
+      <p className={`text-[#0ACF83]${isHidden ? " blur-sm select-none" : ""}`}>{formatEuro(d.montant)}</p>
       <p className="text-[#767676]">{(d.percent * 100).toFixed(0)}%</p>
     </div>
   );
 }
 
 export function RepartitionCAChart({ data }: { data: ProjetCA[] }) {
+  const { isHidden } = usePrivacyMode();
   const sorted = useMemo(
     () => [...data].sort((a, b) => b.montant - a.montant),
     [data]
@@ -97,7 +100,7 @@ export function RepartitionCAChart({ data }: { data: ProjetCA[] }) {
               style={{ backgroundColor: colors[i] }}
             />
             <span className="text-white truncate flex-1">{item.nom}</span>
-            <span className="text-[#767676] shrink-0">{formatEuro(item.montant)}</span>
+            <span className={`text-[#767676] shrink-0${isHidden ? " blur-sm select-none" : ""}`}>{formatEuro(item.montant)}</span>
           </div>
         ))}
         {sorted.length > 6 && (

@@ -47,6 +47,8 @@ import {
   AlertCircle,
   FileText,
   Info,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import {
   Tooltip,
@@ -59,6 +61,8 @@ import { RepartitionHeuresChart } from "./repartition-heures-chart";
 import { EvolutionHeuresChart } from "./evolution-heures-chart";
 import { SemaineChart } from "./semaine-chart";
 import { toast } from "sonner";
+import { Amount } from "@/components/amount";
+import { usePrivacyMode } from "@/lib/privacy-context";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEAR_OPTIONS = ["all", "2024", "2025", "2026"] as const;
@@ -66,14 +70,6 @@ const MOIS_NOMS = [
   "jan", "fev", "mar", "avr", "mai", "juin",
   "juil", "aout", "sep", "oct", "nov", "dec",
 ];
-
-function formatEuro(n: number) {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
 
 function getParam(params: Parametre[], cle: string, fallback: number): number {
   const p = params.find((p) => p.cle === cle);
@@ -110,6 +106,7 @@ const PERIOD_LABELS: Record<string, string> = {
 
 
 export default function DashboardPage() {
+  const { isHidden } = usePrivacyMode();
   const [projets, setProjets] = useState<Projet[]>([]);
   const [allTransactions, setAllTransactions] = useState<TransactionCA[]>([]);
   const [sessions, setSessions] = useState<SessionHeureAvecProjet[]>([]);
@@ -520,6 +517,18 @@ export default function DashboardPage() {
     return { jours: totalJours, heures: totalHeures, nbDevisEnCours };
   }, [allDevis, sessions]);
 
+  // ───── KPI: % de l'année écoulée (pour comparer au % d'objectif rempli) ─────
+  const pctAnneeEcoulee = useMemo(() => {
+    if (selectedYear === "all") return 0;
+    const year = parseInt(selectedYear);
+    const now = new Date();
+    if (year < now.getFullYear()) return 100;
+    if (year > now.getFullYear()) return 0;
+    const start = new Date(year, 0, 1);
+    const diff = (now.getTime() - start.getTime()) / 86_400_000;
+    return Math.min(100, (diff / 365) * 100);
+  }, [selectedYear]);
+
   // ───── KPI: Tresorerie ─────
   const todayDate = new Date().toISOString().split("T")[0];
   const totalProvisions = useMemo(
@@ -791,7 +800,7 @@ export default function DashboardPage() {
                 {valeurTempsFacturable > 0 && (
                   <div className="flex items-center gap-1.5">
                     <p className="text-sm" style={{ color: "#0ACF83" }}>
-                      Valeur temps facturable : {formatEuro(Math.round(valeurTempsFacturable))}
+                      Valeur temps facturable : <Amount value={Math.round(valeurTempsFacturable)} />
                     </p>
                     <Tooltip>
                       <TooltipTrigger
@@ -815,12 +824,11 @@ export default function DashboardPage() {
                               className="flex items-center justify-between gap-3 text-xs"
                             >
                               <span className="text-white">{p.nom}</span>
-                              <span
+                              <Amount
+                                value={Math.round(p.valeur)}
                                 className="font-medium"
                                 style={{ color: "#0ACF83" }}
-                              >
-                                {formatEuro(Math.round(p.valeur))}
-                              </span>
+                              />
                             </div>
                           ))}
                         </div>
@@ -879,7 +887,7 @@ export default function DashboardPage() {
               CA {selectedYear === "all" ? "all time" : selectedYear}
             </CardDescription>
             <CardTitle className="text-xl">
-              {formatEuro(caEncaisse + caEnAttente + caDevise)}
+              <Amount value={caEncaisse + caEnAttente + caDevise} />
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -920,21 +928,21 @@ export default function DashboardPage() {
                         />
                       </div>
                       <p className="text-xs text-[#767676]">
-                        <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                        <span className="text-brand-accent"><Amount value={caEncaisse} /> payés</span>
                         {caEnAttente > 0 && (
                           <>
                             {" + "}
-                            <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                            <span className="text-brand-accent/70"><Amount value={caEnAttente} /> en attente</span>
                           </>
                         )}
                         {" / Objectif "}
-                        {formatEuro(objectifAnnuel)} dépassé
+                        <Amount value={objectifAnnuel} /> dépassé
                       </p>
                       <div
                         className="inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium"
                         style={{ backgroundColor: "#EF9F2720", color: "#EF9F27" }}
                       >
-                        +{formatEuro(depassement)} au-dessus de l&apos;objectif ({Math.round(pctReel)}%)
+                        +<Amount value={depassement} /> au-dessus de l&apos;objectif ({Math.round(pctReel)}%)
                       </div>
                     </div>
                   );
@@ -950,33 +958,111 @@ export default function DashboardPage() {
                 );
                 return (
                   <div className="space-y-1.5">
-                    <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
-                      <div
-                        className="h-full bg-brand-accent transition-all"
-                        style={{ width: `${pctPaye}%` }}
-                      />
-                      <div
-                        className="h-full bg-brand-accent/60 transition-all"
-                        style={{ width: `${pctAttente}%` }}
-                      />
-                      <div
-                        className="h-full bg-brand-accent/30 transition-all"
-                        style={{ width: `${pctSigne}%` }}
-                      />
+                    <div className="relative">
+                      <div className="h-2.5 w-full rounded-full bg-[#0F0F0F] overflow-hidden flex">
+                        <div
+                          className="h-full bg-brand-accent transition-all"
+                          style={{ width: `${pctPaye}%` }}
+                        />
+                        <div
+                          className="h-full bg-brand-accent/60 transition-all"
+                          style={{ width: `${pctAttente}%` }}
+                        />
+                        <div
+                          className="h-full bg-brand-accent/30 transition-all"
+                          style={{ width: `${pctSigne}%` }}
+                        />
+                      </div>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <div
+                              className="absolute bg-white cursor-default"
+                              style={{
+                                left: `${pctAnneeEcoulee}%`,
+                                top: "50%",
+                                width: "2px",
+                                height: "14px",
+                                opacity: 0.7,
+                                transform: "translate(-50%, -50%)",
+                                borderRadius: "1px",
+                              }}
+                            />
+                          }
+                        />
+                        <TooltipContent>
+                          Annee ecoulee : {Math.round(pctAnneeEcoulee)}%
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                     <p className="text-xs text-[#767676]">
-                      <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                      <span className="text-brand-accent"><Amount value={caEncaisse} /> payés</span>
                       {caEnAttente > 0 && (
                         <>
                           {" + "}
-                          <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                          <span className="text-brand-accent/70"><Amount value={caEnAttente} /> en attente</span>
                         </>
                       )}
                       {" + "}
-                      <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
+                      <span className="text-brand-accent/50"><Amount value={caDevise} /> signés</span>
                       {" / "}
-                      {formatEuro(objectifAnnuel)} objectif
+                      <Amount value={objectifAnnuel} /> objectif
                     </p>
+                    {(() => {
+                      const pctPaye = (caEncaisse / objectifAnnuel) * 100;
+                      const pctAvecSigne = ((caEncaisse + caDevise) / objectifAnnuel) * 100;
+                      const ecart = pctPaye - pctAnneeEcoulee;
+                      let rythmeLabel: string;
+                      let RythmeIcon: typeof TrendingUp | null;
+                      let rythmeColor: string;
+                      if (ecart > 5) {
+                        rythmeLabel = "En avance";
+                        RythmeIcon = TrendingUp;
+                        rythmeColor = "#0ACF83";
+                      } else if (ecart < -5) {
+                        rythmeLabel = "En retard";
+                        RythmeIcon = TrendingDown;
+                        rythmeColor = "#EF9F27";
+                      } else {
+                        rythmeLabel = "Dans les temps";
+                        RythmeIcon = null;
+                        rythmeColor = "#767676";
+                      }
+                      return (
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[#767676]">
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="size-3" />
+                            <span className="text-white font-medium">{Math.round(pctAnneeEcoulee)}%</span>
+                            temps
+                          </span>
+                          <span className="opacity-30">→</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Euro className="size-3" />
+                            <span className="text-white font-medium">{Math.round(pctPaye)}%</span>
+                            paye
+                            <span className="opacity-40">·</span>
+                            <span className="text-white font-medium">{Math.round(pctAvecSigne)}%</span>
+                            + signe
+                          </span>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-medium cursor-default"
+                                  style={{ backgroundColor: `${rythmeColor}20`, color: rythmeColor }}
+                                >
+                                  {RythmeIcon && <RythmeIcon className="size-3" />}
+                                  {rythmeLabel}
+                                </span>
+                              }
+                            />
+                            <TooltipContent>
+                              CA paye ({Math.round(pctPaye)}%) vs annee ecoulee ({Math.round(pctAnneeEcoulee)}%)
+                            </TooltipContent>
+                          </Tooltip>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })()
@@ -1003,15 +1089,15 @@ export default function DashboardPage() {
                       />
                     </div>
                     <p className="text-xs text-[#767676]">
-                      <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                      <span className="text-brand-accent"><Amount value={caEncaisse} /> payés</span>
                       {caEnAttente > 0 && (
                         <>
                           {" + "}
-                          <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                          <span className="text-brand-accent/70"><Amount value={caEnAttente} /> en attente</span>
                         </>
                       )}
                       {" + "}
-                      <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
+                      <span className="text-brand-accent/50"><Amount value={caDevise} /> signés</span>
                     </p>
                     <Link
                       href="/objectifs"
@@ -1024,15 +1110,15 @@ export default function DashboardPage() {
               })()
             ) : (
               <p className="text-xs text-[#767676]">
-                <span className="text-brand-accent">{formatEuro(caEncaisse)} payés</span>
+                <span className="text-brand-accent"><Amount value={caEncaisse} /> payés</span>
                 {caEnAttente > 0 && (
                   <>
                     {" + "}
-                    <span className="text-brand-accent/70">{formatEuro(caEnAttente)} en attente</span>
+                    <span className="text-brand-accent/70"><Amount value={caEnAttente} /> en attente</span>
                   </>
                 )}
                 {" + "}
-                <span className="text-brand-accent/50">{formatEuro(caDevise)} signés</span>
+                <span className="text-brand-accent/50"><Amount value={caDevise} /> signés</span>
               </p>
             )}
           </CardContent>
@@ -1056,7 +1142,7 @@ export default function DashboardPage() {
                 {/* Net réel */}
                 <div>
                   <p className="text-xl font-bold text-white">
-                    {netReel ? formatEuro(netReel.montant) : "—"}
+                    {netReel ? <Amount value={netReel.montant} /> : "—"}
                   </p>
                   <p className="text-xs text-[#767676] mt-0.5">
                     {netPeriod.rangeLabel} · {netReel?.mois ?? 0} mois (paye + en attente)
@@ -1069,7 +1155,7 @@ export default function DashboardPage() {
                     <div className="h-px bg-[rgba(255,255,255,0.06)]" />
                     <div>
                       <p className="text-lg font-bold text-brand-accent">
-                        {formatEuro(netAVenir.montant)}
+                        <Amount value={netAVenir.montant} />
                       </p>
                       <p className="text-xs text-[#767676] mt-0.5">
                         Moyenne jan → {netAVenir.dernierMoisLabel} (paye + signe)
@@ -1084,7 +1170,7 @@ export default function DashboardPage() {
                     <div className="h-px bg-[rgba(255,255,255,0.06)]" />
                     <div>
                       <p className="text-lg font-bold text-brand-accent/70">
-                        {formatEuro(netAnneeComplete)}
+                        <Amount value={netAnneeComplete} />
                       </p>
                       <p className="text-xs text-[#767676] mt-0.5">
                         Moyenne sur 12 mois (CA net / 12)
@@ -1105,27 +1191,28 @@ export default function DashboardPage() {
               Tresorerie Qonto
             </CardDescription>
             <CardTitle className="text-xl">
-              {formatEuro(soldeComptePro)}
+              <Amount value={soldeComptePro} />
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-0.5 text-xs text-[#767676]">
               {totalProvisions > 0 && (
                 <p>
-                  Provisions : <span className="text-red-400">-{formatEuro(totalProvisions)}</span>
+                  Provisions : <span className="text-red-400">-<Amount value={totalProvisions} /></span>
                 </p>
               )}
               <p>
                 Solde disponible :{" "}
-                <span style={{ color: "#0ACF83" }}>{formatEuro(soldeDisponible)}</span>
+                <Amount value={soldeDisponible} style={{ color: "#0ACF83" }} />
               </p>
               <p>
                 Salaire versable /6m :{" "}
-                <span className={salaireVersable6m >= 0 ? "text-brand-accent" : "text-red-400"}>
-                  {formatEuro(salaireVersable6m)}
-                </span>
+                <Amount
+                  value={salaireVersable6m}
+                  className={salaireVersable6m >= 0 ? "text-brand-accent" : "text-red-400"}
+                />
               </p>
-              <p>Frais mensuels : {formatEuro(fraisMensuels)}</p>
+              <p>Frais mensuels : <Amount value={fraisMensuels} /></p>
               {soldeUpdatedAt && (
                 <p className="mt-1">
                   MAJ : {new Date(soldeUpdatedAt).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
@@ -1158,7 +1245,7 @@ export default function DashboardPage() {
                 <TooltipTrigger
                   render={
                     <p className="mt-1 text-xs font-medium cursor-default" style={{ color: "#0ACF83" }}>
-                      TJM moyen : {tjmMoyenPondere.valeur} €/j
+                      TJM moyen : <span className={isHidden ? "blur-sm select-none" : ""}>{tjmMoyenPondere.valeur} €/j</span>
                     </p>
                   }
                 />

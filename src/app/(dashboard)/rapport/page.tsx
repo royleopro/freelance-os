@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { Amount } from "@/components/amount";
 import { createClient } from "@/lib/supabase/client";
 import type {
   Projet,
@@ -905,11 +906,11 @@ export default function RapportPage() {
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-3">
-              <KPI label="CA payé" value={formatEuro(caPaye)} accent />
-              <KPI label="CA signé" value={formatEuro(caSigne)} />
+              <KPI label="CA payé" value={<Amount value={caPaye} />} accent />
+              <KPI label="CA signé" value={<Amount value={caSigne} />} />
               <KPI
                 label="Net estimé après taxes"
-                value={formatEuro(netEstime)}
+                value={<Amount value={netEstime} />}
                 sub={`URSSAF ${(tauxUrssaf * 100).toFixed(1)}% + impôts ${(
                   tauxImpots * 100
                 ).toFixed(1)}%`}
@@ -920,7 +921,7 @@ export default function RapportPage() {
               <div>
                 <div className="mb-1.5 flex items-center justify-between text-xs">
                   <span className="text-muted-foreground">
-                    Objectif : {formatEuro(caPaye)} / {formatEuro(objectifPeriode)}
+                    Objectif : <Amount value={caPaye} /> / <Amount value={objectifPeriode} />
                   </span>
                   <span className="font-medium text-[#0ACF83]">
                     {pctObjectif.toFixed(0)}%
@@ -1015,7 +1016,7 @@ export default function RapportPage() {
               <div className="grid gap-3 sm:grid-cols-1">
                 <KPI
                   label="Valeur temps totale de la période"
-                  value={formatEuro(valeurTempsTotale)}
+                  value={<Amount value={valeurTempsTotale} />}
                   accent
                 />
               </div>
@@ -1042,10 +1043,10 @@ export default function RapportPage() {
                           {formatHeures(p.heures)}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
-                          {p.tjm > 0 ? formatEuro(p.tjm) : "—"}
+                          {p.tjm > 0 ? <Amount value={p.tjm} /> : "—"}
                         </TableCell>
                         <TableCell className="text-right">
-                          {formatEuro(p.valeur)}
+                          <Amount value={p.valeur} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1071,7 +1072,7 @@ function KPI({
   accent,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   sub?: string;
   accent?: boolean;
 }) {
@@ -1104,7 +1105,7 @@ function MiniBarChart({ data }: { data: { label: string; value: number }[] }) {
           return (
             <div key={i} className="flex flex-1 flex-col items-center gap-1">
               <div className="w-full text-center text-[10px] text-muted-foreground">
-                {d.value > 0 ? formatEuroCompact(d.value) : ""}
+                {d.value > 0 ? <Amount value={d.value} compact /> : ""}
               </div>
               <div
                 className="w-full rounded-t bg-[#0ACF83]"

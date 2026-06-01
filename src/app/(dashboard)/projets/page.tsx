@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { Amount } from "@/components/amount";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -491,10 +492,10 @@ export default function ProjetsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {isClient ? formatEuro(projet.montant_signe) : naCell}
+                          {isClient ? <Amount value={projet.montant_signe} /> : naCell}
                         </TableCell>
                         <TableCell className="text-right">
-                          {isClient ? formatEuro(projet.montant_paye) : naCell}
+                          {isClient ? <Amount value={projet.montant_paye} /> : naCell}
                         </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {(heuresParProjet[projet.id] ?? 0) > 0
@@ -507,12 +508,12 @@ export default function ProjetsPage() {
                               <TooltipTrigger
                                 render={
                                   <span className="font-medium cursor-default">
-                                    {formatEuro(tjmParProjet[projet.id].valeur)}/j
+                                    <Amount value={tjmParProjet[projet.id].valeur} />/j
                                   </span>
                                 }
                               />
                               <TooltipContent>
-                                Base sur le devis &quot;{tjmParProjet[projet.id].libelle}&quot; — {formatEuro(tjmParProjet[projet.id].montant)} / {tjmParProjet[projet.id].jours}j
+                                Base sur le devis &quot;{tjmParProjet[projet.id].libelle}&quot; — <Amount value={tjmParProjet[projet.id].montant} /> / {tjmParProjet[projet.id].jours}j
                               </TooltipContent>
                             </Tooltip>
                           ) : (
@@ -521,7 +522,9 @@ export default function ProjetsPage() {
                         </TableCell>
                         <TableCell className="text-right font-medium">
                           {isClient
-                            ? rentabiliteLabel(projet.montant_total, heuresParProjet[projet.id] ?? 0)
+                            ? (heuresParProjet[projet.id] ?? 0) > 0
+                              ? <><Amount value={projet.montant_total / (heuresParProjet[projet.id] ?? 1)} />/h</>
+                              : "—"
                             : naCell}
                         </TableCell>
                         <TableCell>

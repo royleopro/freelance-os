@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { usePrivacyMode } from "@/lib/privacy-context";
+import { Amount } from "@/components/amount";
 import {
   BarChart,
   Bar,
@@ -324,7 +326,7 @@ export function SemaineChart() {
         {!loading && valeurTemps > 0 && (
           <div className="flex items-center gap-1.5">
             <p className="text-sm" style={{ color: "#0ACF83" }}>
-              Valeur temps : {formatEuro(Math.round(valeurTemps))}
+              Valeur temps : <Amount value={Math.round(valeurTemps)} />
             </p>
             <UITooltip>
               <TooltipTrigger
@@ -348,12 +350,11 @@ export function SemaineChart() {
                       className="flex items-center justify-between gap-3 text-xs"
                     >
                       <span className="text-white">{p.nom}</span>
-                      <span
+                      <Amount
+                        value={Math.round(p.valeur)}
                         className="font-medium"
                         style={{ color: "#0ACF83" }}
-                      >
-                        {formatEuro(Math.round(p.valeur))}
-                      </span>
+                      />
                     </div>
                   ))}
                 </div>

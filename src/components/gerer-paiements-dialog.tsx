@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { Amount } from "@/components/amount";
 import { createClient } from "@/lib/supabase/client";
 import type { TransactionCA } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -270,7 +271,7 @@ export function GererPaiementsDialog({
                     ) : (
                       <TableRow key={tx.id}>
                         <TableCell className="font-medium">{tx.libelle || "—"}</TableCell>
-                        <TableCell className="text-right">{formatEuro(tx.montant)}</TableCell>
+                        <TableCell className="text-right"><Amount value={tx.montant} /></TableCell>
                         <TableCell>
                           {tx.statut === "paye" ? (
                             <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">Paye</Badge>
@@ -311,7 +312,7 @@ export function GererPaiementsDialog({
                                 <AlertDialogHeader>
                                   <AlertDialogTitle>Supprimer ce paiement ?</AlertDialogTitle>
                                   <AlertDialogDescription>
-                                    Le paiement de {formatEuro(tx.montant)} sera definitivement supprime.
+                                    Le paiement de <Amount value={tx.montant} /> sera definitivement supprime.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
@@ -333,7 +334,7 @@ export function GererPaiementsDialog({
                 </TableBody>
               </Table>
               <p className="text-sm text-muted-foreground">
-                Total lie : {formatEuro(totalLinked)}
+                Total lie : <Amount value={totalLinked} />
               </p>
             </>
           )}
@@ -359,7 +360,7 @@ export function GererPaiementsDialog({
                   <SelectContent>
                     {available.map((tx) => (
                       <SelectItem key={tx.id} value={tx.id}>
-                        {tx.libelle || "Paiement"} — {formatEuro(tx.montant)} ({tx.statut})
+                        {tx.libelle || "Paiement"} — <Amount value={tx.montant} /> ({tx.statut})
                       </SelectItem>
                     ))}
                   </SelectContent>

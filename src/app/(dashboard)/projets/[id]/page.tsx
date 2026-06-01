@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { Amount } from "@/components/amount";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -504,7 +505,7 @@ export default function ProjetDetailPage() {
                 Total CA
               </CardDescription>
               <CardTitle className="text-xl">
-                {formatEuro(totalCA)}
+                <Amount value={totalCA} />
               </CardTitle>
             </CardHeader>
           </Card>
@@ -521,7 +522,7 @@ export default function ProjetDetailPage() {
                 </Badge>
               </CardDescription>
               <CardTitle className="text-xl">
-                {formatEuro(totalPaye)}
+                <Amount value={totalPaye} />
               </CardTitle>
             </CardHeader>
           </Card>
@@ -533,7 +534,7 @@ export default function ProjetDetailPage() {
                 Signe
               </CardDescription>
               <CardTitle className="text-xl">
-                {formatEuro(totalSigne)}
+                <Amount value={totalSigne} />
               </CardTitle>
             </CardHeader>
           </Card>
@@ -556,7 +557,7 @@ export default function ProjetDetailPage() {
               </CardDescription>
               <CardTitle className="text-xl">
                 {rentabiliteEurH !== null
-                  ? formatEuro(rentabiliteEurH) + "/h"
+                  ? <><Amount value={rentabiliteEurH} />/h</>
                   : "—"}
               </CardTitle>
             </CardHeader>
@@ -618,7 +619,7 @@ export default function ProjetDetailPage() {
                     <TooltipTrigger
                       render={
                         <p className="font-medium cursor-default" style={{ color: "#0ACF83" }}>
-                          {formatEuro(tjmDevis.valeur)}/j
+                          <Amount value={tjmDevis.valeur} />/j
                         </p>
                       }
                     />
@@ -628,7 +629,7 @@ export default function ProjetDetailPage() {
                   </Tooltip>
                 ) : (
                   <p className="font-medium">
-                    {projet.tjm > 0 ? formatEuro(projet.tjm) + "/j" : "—"}
+                    {projet.tjm > 0 ? <><Amount value={projet.tjm} />/j</> : "—"}
                   </p>
                 )}
               </div>
@@ -661,10 +662,10 @@ export default function ProjetDetailPage() {
                     Rentabilite reelle
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {formatEuro(totalCA)} /{" "}
+                    <Amount value={totalCA} /> /{" "}
                     {totalHeures.toFixed(1)}h total ={" "}
                     <span className="font-medium text-foreground">
-                      {formatEuro(rentabiliteEurH)}/h
+                      <Amount value={rentabiliteEurH!} />/h
                     </span>
                   </p>
                 </div>
@@ -846,8 +847,8 @@ export default function ProjetDetailPage() {
             </Button>
           </CardAction>
           <CardDescription>
-            {formatEuro(projet.montant_devis)} devis signes
-            {projet.reste_a_payer > 0 && ` — ${formatEuro(projet.reste_a_payer)} reste a payer`}
+            <Amount value={projet.montant_devis} /> devis signes
+            {projet.reste_a_payer > 0 && <> — <Amount value={projet.reste_a_payer} /> reste a payer</>}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -879,7 +880,7 @@ export default function ProjetDetailPage() {
                         <div>
                           <p className="font-medium">{d.libelle}</p>
                           <p className="text-sm text-muted-foreground">
-                            {formatEuro(d.montant_total)}
+                            <Amount value={d.montant_total} />
                             {devisJours > 0 && ` — ${devisJours}j (${devisHeuresSignees}h)`}
                             {d.date_signature &&
                               ` — signe le ${formatDate(d.date_signature)}`}
@@ -1050,7 +1051,7 @@ export default function ProjetDetailPage() {
                                   )}
                                 </TableCell>
                                 <TableCell className="text-right font-medium">
-                                  {formatEuro(t.montant)}
+                                  <Amount value={t.montant} />
                                 </TableCell>
                                 <TableCell>
                                   {t.statut === "paye" ? (
@@ -1084,8 +1085,8 @@ export default function ProjetDetailPage() {
                           </TableBody>
                         </Table>
                         <p className="mt-2 text-sm text-muted-foreground">
-                          Total paye : {formatEuro(totalPayeDevis)} /{" "}
-                          {formatEuro(d.montant_total)}
+                          Total paye : <Amount value={totalPayeDevis} /> /{" "}
+                          <Amount value={d.montant_total} />
                         </p>
                       </div>
                     ) : (
@@ -1159,7 +1160,7 @@ export default function ProjetDetailPage() {
                 {unlinkedQontoDevis.map((d) => (
                   <TableRow key={d.id}>
                     <TableCell className="font-medium">{d.libelle}</TableCell>
-                    <TableCell className="text-right">{formatEuro(d.montant_total)}</TableCell>
+                    <TableCell className="text-right"><Amount value={d.montant_total} /></TableCell>
                     <TableCell>
                       {d.statut === "signe" ? (
                         <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
@@ -1220,9 +1221,9 @@ export default function ProjetDetailPage() {
             </Button>
           </CardAction>
           <CardDescription>
-            {formatEuro(totalPaye)} paye
-            {totalSigne > 0 && ` — ${formatEuro(totalSigne)} signe`}
-            {totalCA > 0 && ` sur ${formatEuro(totalCA)} total`}
+            <Amount value={totalPaye} /> paye
+            {totalSigne > 0 && <> — <Amount value={totalSigne} /> signe</>}
+            {totalCA > 0 && <> sur <Amount value={totalCA} /> total</>}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1255,7 +1256,7 @@ export default function ProjetDetailPage() {
                       })}
                     </TableCell>
                     <TableCell className="text-right font-medium">
-                      {formatEuro(t.montant)}
+                      <Amount value={t.montant} />
                     </TableCell>
                     <TableCell>
                       {t.statut === "paye" ? (
@@ -1293,7 +1294,7 @@ export default function ProjetDetailPage() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Supprimer ce paiement ?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Cette action est irreversible. Le paiement de {formatEuro(t.montant)} sera definitivement supprime.
+                              Cette action est irreversible. Le paiement de <Amount value={t.montant} /> sera definitivement supprime.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>

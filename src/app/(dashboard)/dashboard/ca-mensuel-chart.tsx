@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { usePrivacyMode } from "@/lib/privacy-context";
 import {
   BarChart,
   Bar,
@@ -42,19 +43,21 @@ function CustomTooltip({
   payload?: { payload: PreparedItem }[];
   label?: string;
 }) {
+  const { isHidden } = usePrivacyMode();
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
+  const fmt = (n: number) => isHidden ? <span className="blur-sm select-none">{formatEuro(n)}</span> : formatEuro(n);
   return (
     <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[#1A1A1A] px-3 py-2 text-sm shadow-md">
       <p className="font-medium mb-1.5 text-white">{d.mois}</p>
-      <p className="text-[#767676]">Objectif : {formatEuro(d.objectif)}</p>
-      <p className="text-[#0ACF83]">Payé : {formatEuro(d.paye)}</p>
+      <p className="text-[#767676]">Objectif : {fmt(d.objectif)}</p>
+      <p className="text-[#0ACF83]">Payé : {fmt(d.paye)}</p>
       <p style={{ color: "rgba(10,207,131,0.6)" }}>
-        En attente : {formatEuro(d.en_attente)}
+        En attente : {fmt(d.en_attente)}
       </p>
       {d.urssaf !== undefined && d.urssaf > 0 && (
         <p style={{ color: "#EF9F27" }} className="mt-1 pt-1 border-t border-[rgba(255,255,255,0.06)]">
-          URSSAF estimée : {formatEuro(d.urssaf)}
+          URSSAF estimée : {fmt(d.urssaf)}
         </p>
       )}
     </div>

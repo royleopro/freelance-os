@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { Amount } from "@/components/amount";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import type { Parametre, TransactionCA } from "@/lib/types";
@@ -324,7 +325,7 @@ export default function QontoPage() {
                 <div className="rounded-lg border p-3 space-y-1">
                   <p className="font-medium">Solde compte pro</p>
                   <p className="text-muted-foreground">
-                    {formatEuro(parseFloat(soldeComptePro))}
+                    <Amount value={parseFloat(soldeComptePro)} />
                   </p>
                 </div>
               )}
@@ -334,7 +335,7 @@ export default function QontoPage() {
           {soldeDebug && (
             <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 text-xs text-muted-foreground space-y-1">
               <p className="font-medium text-foreground/70">Debug solde Qonto</p>
-              <p>Solde : {soldeDebug.solde_euros !== null ? formatEuro(soldeDebug.solde_euros) : "—"}</p>
+              <p>Solde : {soldeDebug.solde_euros !== null ? <Amount value={soldeDebug.solde_euros} /> : "—"}</p>
               <p>IBAN trouvé : {soldeDebug.iban_trouve ?? "—"}</p>
               <p>Nb comptes retournés : {soldeDebug.nb_comptes}</p>
               {soldeDebug.erreur && (
@@ -378,7 +379,7 @@ export default function QontoPage() {
                 {(showAllInvoices ? qontoInvoices : qontoInvoices.slice(0, 5)).map((inv) => (
                   <TableRow key={inv.id}>
                     <TableCell className="font-medium">{inv.libelle || "—"}</TableCell>
-                    <TableCell className="text-right">{formatEuro(inv.montant)}</TableCell>
+                    <TableCell className="text-right"><Amount value={inv.montant} /></TableCell>
                     <TableCell>
                       {inv.statut === "paye" ? (
                         <Badge variant="outline" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
@@ -450,7 +451,7 @@ export default function QontoPage() {
                       {tx.libelle || "—"}
                     </TableCell>
                     <TableCell className="text-right">
-                      {formatEuro(tx.montant)}
+                      <Amount value={tx.montant} />
                     </TableCell>
                     <TableCell>
                       {tx.statut === "paye" ? (

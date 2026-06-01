@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { Amount } from "@/components/amount";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import type { Devis, DevisStatut } from "@/lib/types";
@@ -560,7 +561,7 @@ export default function DevisPage() {
                           onKeyDown={(e) => { if (e.key === "Enter") saveEdit(d.id, "montant_total"); if (e.key === "Escape") setEditingCell(null); }}
                         />
                       ) : (
-                        formatEuro(d.montant_total)
+                        <Amount value={d.montant_total} />
                       )}
                     </TableCell>
 
@@ -675,7 +676,7 @@ export default function DevisPage() {
                     {/* Paiements lies */}
                     <TableCell className="text-right">
                       {(paiementsParDevis[d.id] ?? 0) > 0
-                        ? formatEuro(paiementsParDevis[d.id])
+                        ? <Amount value={paiementsParDevis[d.id]} />
                         : <span className="text-muted-foreground">—</span>}
                     </TableCell>
 
@@ -723,7 +724,7 @@ export default function DevisPage() {
                     Total signes
                   </TableCell>
                   <TableCell className="text-right font-bold">
-                    {formatEuro(totalMontantSigne)}
+                    <Amount value={totalMontantSigne} />
                   </TableCell>
                   <TableCell className="text-right font-bold">
                     {totalJoursSignes}j
