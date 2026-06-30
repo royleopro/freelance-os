@@ -97,13 +97,11 @@ function SortableTaskCard({
     setNodeRef,
     transform,
     transition,
-    isDragging,
   } = useSortable({ id: tache.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
   };
 
   return (
@@ -112,9 +110,12 @@ function SortableTaskCard({
       style={style}
       {...attributes}
       {...listeners}
-      onClick={() => onEdit(tache)}
     >
-      <TaskCard tache={tache} sousOuTaches={sousOuTaches} />
+      <TaskCard
+        tache={tache}
+        sousOuTaches={sousOuTaches}
+        onClick={() => onEdit(tache)}
+      />
     </div>
   );
 }
@@ -157,10 +158,14 @@ export function KanbanView({
     async (event: DragEndEvent) => {
       const { active, over } = event;
 
-      if (!over) return;
+      if (!over || !over.id) return;
 
       const activeTache = taches.find((t) => t.id === active.id);
       if (!activeTache) return;
+
+      // Vérifier que over.id est un statut valide
+      const validStatuts: TacheStatut[] = ["backlog", "a_faire", "en_cours", "review", "termine"];
+      if (!validStatuts.includes(over.id as TacheStatut)) return;
 
       const newStatut = over.id as TacheStatut;
 
