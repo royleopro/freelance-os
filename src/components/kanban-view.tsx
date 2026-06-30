@@ -22,6 +22,7 @@ import {
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { TaskCard } from "./task-card";
+import { GripVertical } from "lucide-react";
 import { toast } from "sonner";
 
 interface KanbanViewProps {
@@ -108,14 +109,26 @@ function SortableTaskCard({
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      className="flex gap-2 items-start"
     >
-      <TaskCard
-        tache={tache}
-        sousOuTaches={sousOuTaches}
-        onClick={() => onEdit(tache)}
-      />
+      {/* Poignée de drag */}
+      <div
+        {...attributes}
+        {...listeners}
+        className="flex-shrink-0 p-1 cursor-grab active:cursor-grabbing hover:bg-[rgba(255,255,255,0.06)] rounded transition-colors"
+        title="Glisser pour déplacer"
+      >
+        <GripVertical className="w-4 h-4 text-gray-500 hover:text-gray-300" />
+      </div>
+
+      {/* Contenu cliquable */}
+      <div className="flex-1">
+        <TaskCard
+          tache={tache}
+          sousOuTaches={sousOuTaches}
+          onClick={() => onEdit(tache)}
+        />
+      </div>
     </div>
   );
 }
