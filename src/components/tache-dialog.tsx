@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tache, Projet, TacheStatut, RecurrenceType, JourSemaine } from "@/lib/types";
 import {
@@ -84,6 +84,36 @@ export function TacheDialog({
     recurrence: (tache?.recurrence || "aucune") as RecurrenceType,
     jours_recurrence: (tache?.jours_recurrence || []) as JourSemaine[],
   });
+
+  // Mettre à jour le formData quand la tâche change
+  useEffect(() => {
+    if (tache) {
+      setFormData({
+        titre: tache.titre || "",
+        projet_id: tache.projet_id || "",
+        etiquette: tache.etiquette || "",
+        description: tache.description || "",
+        temps_estime: tache.temps_estime || "",
+        statut: tache.statut as TacheStatut,
+        do_date: tache.do_date || "",
+        recurrence: tache.recurrence as RecurrenceType,
+        jours_recurrence: tache.jours_recurrence || [],
+      });
+    } else {
+      // Réinitialiser pour une nouvelle tâche
+      setFormData({
+        titre: "",
+        projet_id: "",
+        etiquette: "",
+        description: "",
+        temps_estime: "",
+        statut: "backlog",
+        do_date: "",
+        recurrence: "aucune",
+        jours_recurrence: [],
+      });
+    }
+  }, [tache?.id]);
 
   const selectedProjet = projets.find((p) => p.id === formData.projet_id);
 
