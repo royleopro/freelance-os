@@ -58,6 +58,7 @@ import {
 import { CaMensuelChart } from "./ca-mensuel-chart";
 import { RepartitionCAChart } from "./repartition-ca-chart";
 import { RepartitionHeuresChart } from "./repartition-heures-chart";
+import { TasksToday } from "@/components/tasks-today";
 import { EvolutionHeuresChart } from "./evolution-heures-chart";
 import { SemaineChart } from "./semaine-chart";
 import { toast } from "sonner";
@@ -876,6 +877,9 @@ export default function DashboardPage() {
         {/* Semaine en cours — stacked bar chart */}
         <SemaineChart />
       </div>
+
+      {/* ══════════ Section 1.5 — Tâches du jour ══════════ */}
+      <TasksToday />
 
       {/* ══════════ Section 2 — 4 KPI Cards ══════════ */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
