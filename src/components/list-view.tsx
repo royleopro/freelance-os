@@ -3,6 +3,8 @@
 import { useState, useMemo } from "react";
 import type { TacheAvecProjet, SousTache, TacheStatut } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
+import { handleTacheStatusChange } from "@/lib/tache-service";
+import { formatDoDate, isDatePassed } from "@/lib/recurrence";
 import {
   Table,
   TableBody,
@@ -18,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Clock, ArrowUpDown } from "lucide-react";
+import { Clock, ArrowUpDown, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 
 interface ListViewProps {
@@ -27,7 +29,7 @@ interface ListViewProps {
   onEdit: (tache: TacheAvecProjet) => void;
 }
 
-type SortField = "titre" | "projet" | "etiquette" | "statut" | "temps_estime" | "sous_taches";
+type SortField = "titre" | "projet" | "etiquette" | "statut" | "temps_estime" | "sous_taches" | "do_date";
 type SortOrder = "asc" | "desc";
 
 const statutLabels: Record<TacheStatut, string> = {
@@ -91,6 +93,10 @@ export function ListView({
           aVal = (sousOuTaches[a.id] || []).length;
           bVal = (sousOuTaches[b.id] || []).length;
           break;
+        case "do_date":
+          aVal = a.do_date || "9999-12-31";
+          bVal = b.do_date || "9999-12-31";
+          break;
       }
 
       if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
@@ -110,15 +116,15 @@ export function ListView({
     }
   };
 
-  const handleStatutChange = async (tacheId: string, newStatut: string) => {
+  const handleStatutChange = async (tache: TacheAvecProjet, newStatut: string) => {
     try {
-      const { error } = await supabase
-        .from("taches")
-        .update({ statut: newStatut })
-        .eq("id", tacheId);
+      const isRecurrenceApplied = await handleTacheStatusChange(tache, newStatut);
 
-      if (error) throw error;
-      toast.success("Statut mis à jour");
+      if (isRecurrenceApplied) {
+        toast.success("Tâche terminée, prochaine occurrence créée");
+      } else {
+        toast.success("Statut mis à jour");
+      }
     } catch (error) {
       toast.error("Erreur lors de la mise à jour");
     }
@@ -145,6 +151,7 @@ export function ListView({
             <SortHeader field="projet" label="Projet" />
             <SortHeader field="etiquette" label="Étiquette" />
             <SortHeader field="statut" label="Statut" />
+            <SortHeader field="do_date" label="Date" />
             <SortHeader field="temps_estime" label="Temps" />
             <SortHeader field="sous_taches" label="Sous-tâches" />
           </TableRow>
@@ -185,7 +192,7 @@ export function ListView({
                   <Select
                     value={tache.statut}
                     onValueChange={(value) =>
-                      handleStatutChange(tache.id, value)
+                      handleStatutChange(tache, value)
                     }
                   >
                     <SelectTrigger className={`w-32 text-xs ${getStatutColor(tache.statut)} bg-transparent border-0 h-7 px-2`}>
@@ -199,6 +206,22 @@ export function ListView({
                       ))}
                     </SelectContent>
                   </Select>
+                </TableCell>
+                <TableCell>
+                  {tache.do_date ? (
+                    <div
+                      className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
+                        isDatePassed(tache.do_date) && tache.statut !== "termine"
+                          ? "bg-red-500/10 text-red-300"
+                          : "bg-gray-500/10 text-gray-300"
+                      }`}
+                    >
+                      {tache.recurrence !== "aucune" && <RotateCw className="w-3 h-3" />}
+                      {formatDoDate(tache.do_date)}
+                    </div>
+                  ) : (
+                    <span className="text-gray-500">—</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   {tache.temps_estime ? (

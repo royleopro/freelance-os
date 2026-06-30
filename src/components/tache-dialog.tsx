@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Tache, Projet, TacheStatut } from "@/lib/types";
+import type { Tache, Projet, TacheStatut, RecurrenceType, JourSemaine } from "@/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -21,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { joursSemaneListe, recurrenceLabels } from "@/lib/recurrence";
 import { toast } from "sonner";
 
 interface TacheDialogProps {
@@ -77,9 +80,27 @@ export function TacheDialog({
     description: tache?.description || "",
     temps_estime: tache?.temps_estime || "",
     statut: (tache?.statut || "backlog") as TacheStatut,
+    do_date: tache?.do_date || "",
+    recurrence: (tache?.recurrence || "aucune") as RecurrenceType,
+    jours_recurrence: (tache?.jours_recurrence || []) as JourSemaine[],
   });
 
   const selectedProjet = projets.find((p) => p.id === formData.projet_id);
+
+  const toggleJourRecurrence = (jour: JourSemaine) => {
+    const jours = formData.jours_recurrence || [];
+    if (jours.includes(jour)) {
+      setFormData({
+        ...formData,
+        jours_recurrence: jours.filter((j) => j !== jour),
+      });
+    } else {
+      setFormData({
+        ...formData,
+        jours_recurrence: [...jours, jour],
+      });
+    }
+  };
 
   const handleSubmit = async () => {
     if (!formData.titre.trim()) {
@@ -99,6 +120,9 @@ export function TacheDialog({
             description: formData.description || null,
             temps_estime: formData.temps_estime ? Number(formData.temps_estime) : null,
             statut: formData.statut,
+            do_date: formData.do_date || null,
+            recurrence: formData.recurrence,
+            jours_recurrence: formData.recurrence === "personnalise" ? formData.jours_recurrence : null,
           })
           .eq("id", tache.id)
           .select()
@@ -129,6 +153,9 @@ export function TacheDialog({
               description: formData.description || null,
               temps_estime: formData.temps_estime ? Number(formData.temps_estime) : null,
               statut: formData.statut,
+              do_date: formData.do_date || null,
+              recurrence: formData.recurrence,
+              jours_recurrence: formData.recurrence === "personnalise" ? formData.jours_recurrence : null,
               ordre: maxOrdre,
             },
           ])
@@ -265,6 +292,61 @@ export function TacheDialog({
               </Select>
             </div>
           </div>
+
+          <div>
+            <Label htmlFor="do_date">Date prévue</Label>
+            <DatePicker
+              id="do_date"
+              value={formData.do_date}
+              onChange={(e) => setFormData({ ...formData, do_date: e.target.value })}
+              className="bg-[#0A0A0A] border-[rgba(255,255,255,0.06)]"
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="recurrence">Récurrence</Label>
+            <Select
+              value={formData.recurrence}
+              onValueChange={(value) =>
+                setFormData({
+                  ...formData,
+                  recurrence: value as RecurrenceType,
+                  jours_recurrence: [],
+                })
+              }
+            >
+              <SelectTrigger className="bg-[#0A0A0A] border-[rgba(255,255,255,0.06)]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(recurrenceLabels).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {formData.recurrence === "personnalise" && (
+            <div>
+              <Label>Jours de la semaine</Label>
+              <div className="grid grid-cols-4 gap-2">
+                {joursSemaneListe.map((jour) => (
+                  <label
+                    key={jour.value}
+                    className="flex items-center gap-2 text-sm cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={(formData.jours_recurrence || []).includes(jour.value)}
+                      onCheckedChange={() => toggleJourRecurrence(jour.value)}
+                    />
+                    {jour.label.substring(0, 3)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from "react";
 import type { TacheAvecProjet, SousTache, TacheStatut } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
+import { handleTacheStatusChange } from "@/lib/tache-service";
 import {
   DndContext,
   closestCorners,
@@ -167,13 +168,14 @@ export function KanbanView({
 
       setLoading(true);
       try {
-        const { error } = await supabase
-          .from("taches")
-          .update({ statut: newStatut })
-          .eq("id", activeTache.id);
+        const isRecurrenceApplied = await handleTacheStatusChange(activeTache, newStatut);
 
-        if (error) throw error;
-        toast.success(`Tâche déplacée vers ${colonnes.find((c) => c.statut === newStatut)?.titre}`);
+        if (isRecurrenceApplied) {
+          toast.success("Tâche terminée, prochaine occurrence créée");
+        } else {
+          toast.success(`Tâche déplacée vers ${colonnes.find((c) => c.statut === newStatut)?.titre}`);
+        }
+
         if (onRefetch) {
           await onRefetch();
         }

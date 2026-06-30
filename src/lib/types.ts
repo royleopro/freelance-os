@@ -138,6 +138,8 @@ export interface Objectif {
 }
 
 export type TacheStatut = "backlog" | "a_faire" | "en_cours" | "review" | "termine";
+export type RecurrenceType = "aucune" | "quotidien" | "hebdomadaire" | "mensuel" | "personnalise";
+export type JourSemaine = "lun" | "mar" | "mer" | "jeu" | "ven" | "sam" | "dim";
 
 export interface Tache {
   id: string;
@@ -148,6 +150,10 @@ export interface Tache {
   statut: TacheStatut;
   temps_estime: number | null;
   ordre: number;
+  do_date: string | null;
+  recurrence: RecurrenceType;
+  jours_recurrence: JourSemaine[] | null;
+  derniere_occurrence: string | null;
   created_at: string;
   updated_at: string;
 }

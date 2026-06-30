@@ -2,7 +2,8 @@
 
 import type { TacheAvecProjet, SousTache } from "@/lib/types";
 import { forwardRef } from "react";
-import { Clock } from "lucide-react";
+import { Clock, RotateCw } from "lucide-react";
+import { formatDoDate, isDatePassed } from "@/lib/recurrence";
 
 interface TaskCardProps {
   tache: TacheAvecProjet;
@@ -68,10 +69,27 @@ export const TaskCard = forwardRef<HTMLDivElement, TaskCardProps>(
             )}
           </div>
 
-          {tache.temps_estime && (
-            <div className="flex items-center gap-1 text-xs text-gray-400">
-              <Clock className="w-3 h-3" />
-              <span>{tache.temps_estime}h</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {tache.temps_estime && (
+              <div className="flex items-center gap-1 text-xs text-gray-400">
+                <Clock className="w-3 h-3" />
+                <span>{tache.temps_estime}h</span>
+              </div>
+            )}
+            {tache.recurrence !== "aucune" && (
+              <RotateCw className="w-3 h-3 text-[#0ACF83]" />
+            )}
+          </div>
+
+          {tache.do_date && (
+            <div
+              className={`text-xs px-2 py-1 rounded ${
+                isDatePassed(tache.do_date) && tache.statut !== "termine"
+                  ? "bg-red-500/10 text-red-300"
+                  : "bg-gray-500/10 text-gray-300"
+              }`}
+            >
+              {formatDoDate(tache.do_date)}
             </div>
           )}
 
