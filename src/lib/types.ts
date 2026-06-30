@@ -136,3 +136,31 @@ export interface Objectif {
   tjm_cible: number;
   jours_cibles: number;
 }
+
+export type TacheStatut = "backlog" | "a_faire" | "en_cours" | "review" | "termine";
+
+export interface Tache {
+  id: string;
+  projet_id: string | null;
+  titre: string;
+  description: string | null;
+  etiquette: string | null;
+  statut: TacheStatut;
+  temps_estime: number | null;
+  ordre: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TacheAvecProjet extends Tache {
+  projets: { nom: string; type?: string } | null;
+}
+
+export interface SousTache {
+  id: string;
+  tache_id: string;
+  titre: string;
+  terminee: boolean;
+  ordre: number;
+  created_at: string;
+}
