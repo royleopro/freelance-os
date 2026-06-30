@@ -25,6 +25,7 @@ export default function TachesPage() {
   const [projets, setProjets] = useState<Projet[]>([]);
   const [selectedProjet, setSelectedProjet] = useState<string>("");
   const [selectedEtiquette, setSelectedEtiquette] = useState<string>("");
+  const [selectedDateFilter, setSelectedDateFilter] = useState<"toutes" | "avec" | "sans">("toutes");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTache, setEditingTache] = useState<Tache | null>(null);
   const [allTaches, setAllTaches] = useState<TacheAvecProjet[]>([]);
@@ -100,9 +101,13 @@ export default function TachesPage() {
   }, [supabase, selectedProjet]);
 
   // Filtrer les tâches par étiquette
-  const filteredTaches = selectedEtiquette
-    ? allTaches.filter((t) => t.etiquette === selectedEtiquette)
-    : allTaches;
+  const filteredTaches = allTaches
+    .filter((t) => (selectedEtiquette ? t.etiquette === selectedEtiquette : true))
+    .filter((t) => {
+      if (selectedDateFilter === "avec") return t.do_date !== null;
+      if (selectedDateFilter === "sans") return t.do_date === null;
+      return true;
+    });
 
   const handleOpenDialog = () => {
     setEditingTache(null);
@@ -184,6 +189,18 @@ export default function TachesPage() {
                 </SelectContent>
               </Select>
             )}
+
+            {/* Filtre date */}
+            <Select value={selectedDateFilter} onValueChange={(v) => setSelectedDateFilter(v as any)}>
+              <SelectTrigger className="w-full sm:w-40 bg-[#1A1A1A] border-[rgba(255,255,255,0.06)]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="toutes">Toutes les dates</SelectItem>
+                <SelectItem value="avec">Avec date</SelectItem>
+                <SelectItem value="sans">Sans date</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Toggle de vue */}
