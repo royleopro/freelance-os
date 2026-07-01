@@ -23,8 +23,8 @@ export default function TachesPage() {
   const supabase = createClient();
   const [viewMode, setViewMode] = useState<ViewMode>("kanban");
   const [projets, setProjets] = useState<Projet[]>([]);
-  const [selectedProjet, setSelectedProjet] = useState<string>("");
-  const [selectedEtiquette, setSelectedEtiquette] = useState<string>("");
+  const [selectedProjet, setSelectedProjet] = useState<string | null>("");
+  const [selectedEtiquette, setSelectedEtiquette] = useState<string | null>("");
   const [selectedDateFilter, setSelectedDateFilter] = useState<"toutes" | "avec" | "sans">("toutes");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTache, setEditingTache] = useState<Tache | null>(null);

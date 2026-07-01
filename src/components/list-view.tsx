@@ -116,7 +116,8 @@ export function ListView({
     }
   };
 
-  const handleStatutChange = async (tache: TacheAvecProjet, newStatut: string) => {
+  const handleStatutChange = async (tache: TacheAvecProjet, newStatut: string | null) => {
+    if (!newStatut) return;
     try {
       const isRecurrenceApplied = await handleTacheStatusChange(tache, newStatut);
 

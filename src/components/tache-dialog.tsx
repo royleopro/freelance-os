@@ -34,6 +34,18 @@ interface TacheDialogProps {
   onSave: (tache: Tache) => void;
 }
 
+interface FormDataType {
+  titre: string;
+  projet_id: string | null;
+  etiquette: string | null;
+  description: string;
+  temps_estime: string;
+  statut: TacheStatut;
+  do_date: string;
+  recurrence: RecurrenceType;
+  jours_recurrence: JourSemaine[];
+}
+
 const statuts: TacheStatut[] = ["backlog", "a_faire", "en_cours", "review", "termine"];
 const etiquettes = [
   "projet",
@@ -73,12 +85,12 @@ export function TacheDialog({
 }: TacheDialogProps) {
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormDataType>({
     titre: tache?.titre || "",
-    projet_id: tache?.projet_id || "",
-    etiquette: tache?.etiquette || "",
+    projet_id: tache?.projet_id || null,
+    etiquette: tache?.etiquette || null,
     description: tache?.description || "",
-    temps_estime: tache?.temps_estime || "",
+    temps_estime: tache?.temps_estime ? String(tache.temps_estime) : "",
     statut: (tache?.statut || "backlog") as TacheStatut,
     do_date: tache?.do_date || "",
     recurrence: (tache?.recurrence || "aucune") as RecurrenceType,
@@ -90,10 +102,10 @@ export function TacheDialog({
     if (tache) {
       setFormData({
         titre: tache.titre || "",
-        projet_id: tache.projet_id || "",
+        projet_id: tache.projet_id || null,
         etiquette: tache.etiquette || "",
         description: tache.description || "",
-        temps_estime: tache.temps_estime || "",
+        temps_estime: tache.temps_estime ? String(tache.temps_estime) : "",
         statut: tache.statut as TacheStatut,
         do_date: tache.do_date || "",
         recurrence: tache.recurrence as RecurrenceType,
@@ -103,8 +115,8 @@ export function TacheDialog({
       // Réinitialiser pour une nouvelle tâche
       setFormData({
         titre: "",
-        projet_id: "",
-        etiquette: "",
+        projet_id: null,
+        etiquette: null,
         description: "",
         temps_estime: "",
         statut: "backlog",
