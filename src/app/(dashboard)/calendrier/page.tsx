@@ -820,10 +820,16 @@ export default function CalendrierPage() {
         `/api/calendar/events?timeMin=${timeMin}&timeMax=${timeMax}`
       );
       if (res.ok) {
-        setEvents(await res.json());
+        const data = await res.json();
+        setEvents(data);
+      } else {
+        const error = await res.json().catch(() => ({ error: "Erreur inconnue" }));
+        console.error("Erreur récupération événements:", error);
+        toast.error(error.error || "Impossible de récupérer les événements");
       }
-    } catch {
-      // silently fail
+    } catch (error) {
+      console.error("Erreur fetch événements:", error);
+      toast.error("Erreur réseau lors de la récupération des événements");
     } finally {
       setLoading(false);
     }
