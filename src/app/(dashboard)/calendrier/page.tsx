@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { signIn, useSession } from "next-auth/react";
+import { signIn, useSession, signOut } from "next-auth/react";
 import { toast } from "sonner";
 import {
   CalendarDays,
@@ -12,6 +12,9 @@ import {
   Trash2,
   Video,
   X,
+  Wifi,
+  WifiOff,
+  AlertCircle,
 } from "lucide-react";
 
 interface CalendarEvent {
@@ -713,6 +716,63 @@ function WeekView({
   );
 }
 
+// ─── Google Connection Status ───────────────────────────
+function GoogleConnectionStatus({
+  session,
+  status,
+}: {
+  session: any;
+  status: string;
+}) {
+  if (status === "loading") {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-[#1A1A1A] border border-[#2A2A2A] px-3 py-2">
+        <div className="h-2 w-2 rounded-full bg-[#888] animate-pulse" />
+        <span className="text-xs text-[#888]">Vérification...</span>
+      </div>
+    );
+  }
+
+  if (session?.accessToken) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-[rgba(10,207,131,0.1)] border border-[rgba(10,207,131,0.3)] px-3 py-2">
+        <Wifi className="h-3.5 w-3.5 text-[#0ACF83]" />
+        <span className="text-xs text-[#0ACF83] font-medium">
+          Connecté à Google Calendar
+        </span>
+        {session?.user?.email && (
+          <span className="text-xs text-[#0ACF83] opacity-70">
+            ({session.user.email})
+          </span>
+        )}
+        <button
+          onClick={() => signOut()}
+          className="ml-auto text-xs text-[#0ACF83] hover:text-[#09b874] transition underline"
+        >
+          Déconnecter
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)] px-3 py-2">
+      <div className="flex items-center gap-2">
+        <WifiOff className="h-3.5 w-3.5 text-[#EF4444]" />
+        <span className="text-xs text-[#EF4444] font-medium">
+          Non connecté à Google Calendar
+        </span>
+      </div>
+      <button
+        onClick={() => signIn("google")}
+        className="text-xs text-[#EF4444] hover:text-[#f87171] transition underline font-medium"
+      >
+        Connecter
+      </button>
+    </div>
+  );
+}
+
 // ─── Main Page ──────────────────────────────────────────
 export default function CalendrierPage() {
   const { data: session, status } = useSession();
@@ -832,36 +892,42 @@ export default function CalendrierPage() {
   const weekDays = getWeekDays(weekMonday);
   const weekLabel = `${weekDays[0].getDate()} ${weekDays[0].toLocaleDateString("fr-FR", { month: "short" })} – ${weekDays[6].getDate()} ${weekDays[6].toLocaleDateString("fr-FR", { month: "short", year: "numeric" })}`;
 
-  // ─── Not connected to Google ─────────────────────────
+  // ─── Connection status always visible ─────────────────
   if (status === "loading") {
     return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <div className="animate-pulse text-[#666] text-sm">Chargement...</div>
+      <div className="space-y-4">
+        <GoogleConnectionStatus session={session} status={status} />
+        <div className="flex items-center justify-center h-[60vh]">
+          <div className="animate-pulse text-[#666] text-sm">Chargement...</div>
+        </div>
       </div>
     );
   }
 
   if (!session?.accessToken) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1A1A1A] border border-[#2A2A2A]">
-          <CalendarDays className="h-8 w-8 text-[#666]" />
+      <div className="space-y-4">
+        <GoogleConnectionStatus session={session} status={status} />
+        <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1A1A1A] border border-[#2A2A2A]">
+            <CalendarDays className="h-8 w-8 text-[#666]" />
+          </div>
+          <div className="text-center">
+            <h2 className="text-lg font-semibold text-white mb-1">
+              Google Calendar
+            </h2>
+            <p className="text-sm text-[#888]">
+              Connecte ton compte pour voir tes événements
+            </p>
+          </div>
+          <button
+            onClick={() => signIn("google")}
+            className="mt-2 flex items-center gap-2 rounded-lg bg-[#0ACF83] px-5 py-2.5 text-sm font-medium text-[#0A0A0A] transition hover:bg-[#09b874]"
+          >
+            <CalendarDays className="h-4 w-4" />
+            Connecter Google Calendar
+          </button>
         </div>
-        <div className="text-center">
-          <h2 className="text-lg font-semibold text-white mb-1">
-            Google Calendar
-          </h2>
-          <p className="text-sm text-[#888]">
-            Connecte ton compte pour voir tes événements
-          </p>
-        </div>
-        <button
-          onClick={() => signIn("google")}
-          className="mt-2 flex items-center gap-2 rounded-lg bg-[#0ACF83] px-5 py-2.5 text-sm font-medium text-[#0A0A0A] transition hover:bg-[#09b874]"
-        >
-          <CalendarDays className="h-4 w-4" />
-          Connecter Google Calendar
-        </button>
       </div>
     );
   }
@@ -869,6 +935,7 @@ export default function CalendrierPage() {
   // ─── Connected ────────────────────────────────────────
   return (
     <div className="space-y-4">
+      <GoogleConnectionStatus session={session} status={status} />
       {/* Event modal (create / edit) */}
       {modalOpen && (
         <EventModal
