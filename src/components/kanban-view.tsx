@@ -12,6 +12,7 @@ import {
   useSensor,
   useSensors,
   DragEndEvent,
+  useDroppable,
 } from "@dnd-kit/core";
 import {
   arrayMove,
@@ -53,12 +54,14 @@ function KanbanColumn({
   sousOuTaches: Record<string, SousTache[]>;
   onEdit: (tache: TacheAvecProjet) => void;
 }) {
-  const { setNodeRef } = useSortable({ id: statut });
+  const { setNodeRef, isOver } = useDroppable({ id: statut });
 
   return (
     <div
       ref={setNodeRef}
-      className="flex flex-col gap-3 p-4 bg-[#0A0A0A] rounded-lg flex-1 min-h-[600px]"
+      className={`flex flex-col gap-3 p-4 bg-[#0A0A0A] rounded-lg flex-1 min-h-[600px] transition-colors ${
+        isOver ? "bg-[#1A1A1A] ring-2 ring-[#0ACF83]" : ""
+      }`}
     >
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-white">{titre}</h3>

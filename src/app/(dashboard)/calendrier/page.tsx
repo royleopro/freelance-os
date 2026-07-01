@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { signIn, useSession, signOut } from "next-auth/react";
 import { toast } from "sonner";
+import { createClient } from "@/lib/supabase/client";
 import {
   CalendarDays,
   ChevronLeft,
@@ -776,6 +777,7 @@ function GoogleConnectionStatus({
 // ─── Main Page ──────────────────────────────────────────
 export default function CalendrierPage() {
   const { data: session, status } = useSession();
+  const supabase = createClient();
   const [view, setView] = useState<ViewMode>("month");
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -819,14 +821,48 @@ export default function CalendrierPage() {
       const res = await fetch(
         `/api/calendar/events?timeMin=${timeMin}&timeMax=${timeMax}`
       );
+
+      let allEvents: CalendarEvent[] = [];
+
       if (res.ok) {
         const data = await res.json();
-        setEvents(data);
+        allEvents = data;
       } else {
         const error = await res.json().catch(() => ({ error: "Erreur inconnue" }));
         console.error("Erreur récupération événements:", error);
-        toast.error(error.error || "Impossible de récupérer les événements");
       }
+
+      // Charger aussi les tâches avec date limite
+      try {
+        const timeMinDate = new Date(timeMin);
+        const timeMaxDate = new Date(timeMax);
+
+        const { data: taches } = await supabase
+          .from("taches")
+          .select("id, titre, do_date, statut")
+          .not("do_date", "is", null)
+          .gte("do_date", timeMinDate.toISOString().split("T")[0])
+          .lte("do_date", timeMaxDate.toISOString().split("T")[0]);
+
+        if (taches) {
+          const tacheEvents = taches.map((t: any) => ({
+            id: `tache-${t.id}`,
+            summary: `📋 ${t.titre}`,
+            start: `${t.do_date}T00:00:00`,
+            end: `${t.do_date}T23:59:59`,
+            description: "",
+            colorId: null,
+            allDay: true,
+            conferenceLink: null,
+            recurringEventId: null,
+          }));
+          allEvents = [...allEvents, ...tacheEvents];
+        }
+      } catch (error) {
+        console.error("Erreur chargement tâches:", error);
+      }
+
+      setEvents(allEvents);
     } catch (error) {
       console.error("Erreur fetch événements:", error);
       toast.error("Erreur réseau lors de la récupération des événements");
